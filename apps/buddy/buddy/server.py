@@ -20,12 +20,14 @@ except ImportError:
 
 try:
     from reachy_mini import ReachyMini
+    from .motion import BuddyMotion
     ROBOT_AVAILABLE = True
 except ImportError:
+    ReachyMini = None
+    BuddyMotion = None
     ROBOT_AVAILABLE = False
 
 from .ai import get_ai
-from .motion import BuddyMotion
 from .config import LLM_PROVIDER, OLLAMA_MODEL, TTS_VOICE, VOICES
 
 app = FastAPI(title="Buddy - Companion Robot")
