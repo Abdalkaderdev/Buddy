@@ -1,101 +1,138 @@
-# Reachy Mini 🤖
+# Buddy 🤖
 
-[![Ask on HuggingChat](https://img.shields.io/badge/Read_the-Documentation-yellow?logo=huggingface&logoColor=yellow)](https://huggingface.co/docs/reachy_mini/)
-[![Discord](https://img.shields.io/badge/Discord-Join_the_Community-7289DA?logo=discord&logoColor=white)](https://discord.gg/Y7FgMqHsub)
+An open-source AI companion robot you can build at home for around **$30**.
 
-**Reachy Mini is an open-source, expressive robot made for hackers and AI builders.**
+Buddy listens, sees, and talks back — powered by Claude, running on a Raspberry Pi 4.
 
-🛒 [**Buy Reachy Mini**](https://www.hf.co/reachy-mini/)
-
-[![Reachy Mini Hello](/docs/assets/reachy_mini_hello.gif)](https://www.pollen-robotics.com/reachy-mini/)
-
-## ⚡️ Build and start your own robot
-
-**Choose your platform to access the specific guide:**
-
-| **🤖 Reachy Mini (Wireless)** | **🔌 Reachy Mini Lite** | **💻 Simulation** |
-| :---: | :---: | :---: |
-| The full autonomous experience.<br>Raspberry Pi 4 + Battery + WiFi. | The developer version.<br>USB connection to your computer. | No hardware required.<br>Prototype in MuJoCo. |
-| 👉 [**Go to Wireless Guide**](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini/get_started) | 👉 [**Go to Lite Guide**](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini_lite/get_started) | 👉 [**Go to Simulation**](https://huggingface.co/docs/reachy_mini/platforms/simulation/get_started) |
-
-
-
-> ⚡ **Pro tip:** Install [uv](https://docs.astral.sh/uv/getting-started/installation/) for 10-100x faster app installations (auto-detected, falls back to `pip`).
-
-<br>
-
-## 📱 Apps & Ecosystem
-
-Reachy Mini comes with an app store powered by Hugging Face Spaces. You can install these apps directly from your robot's dashboard with one click!
-
-* **🗣️ [Conversation App](https://huggingface.co/spaces/pollen-robotics/reachy_mini_conversation_app):** Talk naturally with Reachy Mini (powered by LLMs).
-* **📻 [Radio](https://huggingface.co/spaces/pollen-robotics/reachy_mini_radio):** Listen to the radio with Reachy Mini!
-* **👋 [Hand Tracker](https://huggingface.co/spaces/pollen-robotics/hand_tracker_v2):** The robot follows your hand movements in real-time.
-
-👉 [**Browse all apps on Hugging Face**](https://hf.co/reachy-mini/#/apps)
-
-<br>
-
-## 🚀 Getting Started with Reachy Mini SDK
-
-### User guides
-* **[Installation](https://huggingface.co/docs/reachy_mini/SDK/installation)**: 5 minutes to set up your computer
-* **[Quickstart Guide](https://huggingface.co/docs/reachy_mini/SDK/quickstart)**: Run your first behavior on Reachy Mini
-* **[Python SDK](https://huggingface.co/docs/reachy_mini/SDK/python-sdk)**: Learn to move, see, speak, and hear.
-* **[AI Integrations](https://huggingface.co/docs/reachy_mini/SDK/integration)**: Connect LLMs, build Apps, and publish to Hugging Face.
-* **[Core Concepts](https://huggingface.co/docs/reachy_mini/SDK/core-concept)**: Architecture, coordinate systems, and safety limits.
-* 🤗[**Share your app with the community**](https://huggingface.co/blog/pollen-robotics/make-and-publish-your-reachy-mini-apps)
-* 📂 [**Browse the Examples Folder**](examples)
-* 📓 [**Tutorial Notebooks**](docs/notebooks): Step-by-step Jupyter notebooks covering connection, movement, camera, and audio
-
-### 🤖 AI-Assisted Development
-
-Using an AI coding agent (Claude Code, Codex, Copilot, etc.)? You can start building apps right away. Paste this prompt to your agent:
-
-> *I'd like to create a Reachy Mini app. Start by reading https://github.com/pollen-robotics/reachy_mini/blob/develop/AGENTS.md*
-
-This [**AGENTS.md**](AGENTS.md) guide gives AI agents everything they need: SDK patterns, best practices, example apps, and step-by-step skills.
-
-### Quick Look
-After [installing the SDK](https://huggingface.co/docs/reachy_mini/SDK/installation), once your robot is awake, you can control it in just **a few lines of code**:
-
-```python
-from reachy_mini import ReachyMini
-from reachy_mini.utils import create_head_pose
-
-with ReachyMini() as mini:
-    # Look up and tilt head
-    mini.goto_target(
-        head=create_head_pose(z=10, roll=15, degrees=True, mm=True),
-        duration=1.0
-    )
+```
+┌──────────────────────────────────────────────────────────────┐
+│  YOU ────────────►  Buddy  ◄──────────── ANYONE ON YOUR WIFI │
+│   speak               │                    chats via browser │
+│   (mic)               │                                      │
+│                       ▼                                      │
+│              ┌──────────────────┐                            │
+│              │  Raspberry Pi 4  │                            │
+│              │  • USB mic       │                            │
+│              │  • Fisheye cam   │                            │
+│              │  • Mono speaker  │                            │
+│              └──────────────────┘                            │
+│                       │                                      │
+│                       ▼                                      │
+│              voice + face context                            │
+│                       │                                      │
+│                       ▼                                      │
+│                   Claude API                                 │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-<br>
+## What Buddy does
 
-## 🛠 Hardware Overview
+- 🎤 **Listens** — push-to-talk web mic, or USB mic on the Pi
+- 👁️ **Sees** — face detection on the camera feed gives Buddy live context
+  ("am I alone right now?" — Buddy actually knows)
+- 🧠 **Thinks** — Claude Haiku 4.5 for responses with personality
+- 🔊 **Talks back** — Edge TTS with 12 voices (English + Iraqi/Egyptian/Saudi Arabic)
+- 🌐 **Works from anything** — phone, laptop, tablet, all on your WiFi
 
-Reachy Mini robots are sold as kits and generally take **2 to 3 hours** to assemble. Detailed step-by-step guides are available in the platform-specific folders linked above.
+## Hardware — ~40,000 IQD ($31) total
 
-* **Reachy Mini (Wireless):** Runs onboard (RPi 4), autonomous, includes IMU. [See specs](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini/hardware).
-* **Reachy Mini Lite:** Runs on your PC, powered via wall outlet. [See specs](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini_lite/hardware).
+All parts sourced from [ecity-iq.com](https://ecity-iq.com/) in Erbil. Full
+build with prices and direct links is in
+[`buddy_electronics_shopping_list.docx`](./buddy_electronics_shopping_list.docx).
 
-<br>
+| Part | Price |
+|---|---|
+| Raspberry Pi 4 B (your own) | — |
+| Pi 4 USB-C 5V power supply | 5,500 IQD |
+| Night Vision Fisheye Camera 5MP 160° | 25,000 IQD |
+| USB Sound Card + mini microphone | 3,500 IQD |
+| Mono 5W amplifier board | 1,250 IQD |
+| Harman Kardon 1.5" 40mm 4Ω speaker | 5,000 IQD |
+| **Total** | **~40,250 IQD** |
 
-## ❓ Troubleshooting
+See [`apps/buddy/README.md`](./apps/buddy/README.md) for the wiring guide.
 
-Encountering an issue? 👉 **[Check the Troubleshooting & FAQ Guide](https://huggingface.co/docs/reachy_mini/troubleshooting)**
+## Quick start — laptop simulator (no Pi needed)
 
-<br>
+You can try Buddy on your laptop before any hardware arrives:
 
-## 🤝 Community & Contributing
+```bash
+git clone https://github.com/Abdalkaderdev/Buddy.git
+cd Buddy
+python -m venv .venv
+.venv/Scripts/activate                              # Windows
+# source .venv/bin/activate                         # macOS / Linux
+pip install -e ./apps/buddy
+pip install anthropic edge-tts fastapi uvicorn opencv-python \
+    python-multipart faster-whisper websockets
 
-* **Join the Community:** Join [Discord](https://discord.gg/2bAhWfXme9) to share your moments with Reachy, build apps together, and get help.
-* **Found a bug?** Open an issue on this repository.
-* **Guidelines:** Review our [contributing guidelines](docs/contributing.md) to learn how to contribute code, report issues, or suggest features.
+set ANTHROPIC_API_KEY=sk-ant-...                    # Windows
+# export ANTHROPIC_API_KEY=sk-ant-...               # macOS / Linux
 
+python -m buddy.server
+```
+
+Open <http://localhost:8080> in Chrome or Edge, click the purple mic, and talk.
+
+## Quick start — on the Raspberry Pi
+
+After flashing Raspberry Pi OS 64-bit with Wi-Fi and SSH enabled:
+
+```bash
+ssh pi@buddy.local
+curl -L https://raw.githubusercontent.com/Abdalkaderdev/Buddy/main/apps/buddy/scripts/setup_pi.sh | bash
+echo "ANTHROPIC_API_KEY=sk-ant-..." > ~/.buddy.env
+chmod 600 ~/.buddy.env
+systemctl --user restart buddy.service
+```
+
+Open `http://buddy.local:8080` from any device on the same Wi-Fi.
+
+Full setup including hardware wiring is in [`apps/buddy/README.md`](./apps/buddy/README.md).
+
+## Project layout
+
+```
+.
+├── README.md                              # this file
+├── apps/buddy/                            # the Buddy app
+│   ├── README.md                          # hardware build + dev guide
+│   ├── pyproject.toml
+│   ├── scripts/setup_pi.sh                # one-shot Pi installer
+│   └── buddy/
+│       ├── server.py                      # FastAPI + WebSocket web UI
+│       ├── ai.py                          # Claude / Ollama provider
+│       ├── audio.py                       # Whisper STT + Edge TTS
+│       ├── vision.py                      # OpenCV face detection
+│       ├── motion.py                      # (optional) physical motion
+│       ├── config.py                      # personality + settings
+│       └── static/                        # web UI (HTML/CSS/JS)
+├── scripts/make_shopping_list.py          # regenerates the .docx parts list
+├── plan.md                                # original project plan
+└── buddy_electronics_shopping_list.docx   # printable shopping list
+```
+
+## Configuration
+
+Edit [`apps/buddy/buddy/config.py`](./apps/buddy/buddy/config.py):
+
+| Setting | Default |
+|---|---|
+| `LLM_PROVIDER` | `"claude"` (or `"ollama"` for fully local) |
+| `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` |
+| `SYSTEM_PROMPT` | Buddy's personality — edit to taste |
+| `TTS_VOICE` | `en-IE-ConnorNeural` (Irish) |
+| `VOICES` | 12 voices, 4 dialects |
+
+Env vars on the server:
+
+| Var | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude API key |
+| `BUDDY_CAMERA` | `0` to disable camera face detection |
+| `BUDDY_CAMERA_INDEX` | which `/dev/videoN` to use (default 0) |
 
 ## License
 
-This project is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file for details.
-Hardware design files are licensed under Creative Commons BY-SA-NC.
+MIT.

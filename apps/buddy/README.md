@@ -1,19 +1,8 @@
-# Buddy — Interactive Companion Robot
+# Buddy — App + Hardware Build
 
-A playful AI companion that recognizes faces, chats conversationally,
-and (optionally) expresses emotions through movement on a Reachy Mini.
-This README is for the **Raspberry Pi 4 build** sourced from ecity-iq.com.
-
----
-
-## Features
-
-- **Conversational AI** — Claude Haiku 4.5 (or Ollama as fallback)
-- **Voice in** — browser Web Speech API (Chrome/Edge), or `/api/transcribe` with Whisper
-- **Voice out** — Edge TTS (12 voices: English + Iraqi/Egyptian/Saudi Arabic)
-- **Face detection** — OpenCV (USB webcam or Pi camera)
-- **Optional face recognition** — `face_recognition` extra (`pip install buddy[recognition]`)
-- **Optional motion** — works as a chat-only app if no Reachy Mini robot is connected
+This folder holds the Buddy app code and a step-by-step hardware build guide
+for the Raspberry Pi 4 version. For the project overview, see the
+[root README](../../README.md).
 
 ---
 
@@ -21,133 +10,136 @@ This README is for the **Raspberry Pi 4 build** sourced from ecity-iq.com.
 
 | Item | Price (IQD) | Notes |
 |---|---|---|
-| Raspberry Pi 4 Model B | (have it) | Pi 5 needs a 15→22-pin CSI adapter |
-| Pi 4 USB-C 5V power supply | 5,500 | Pi 5 uses the 27W variant instead |
+| Raspberry Pi 4 Model B | — | Use what you have |
+| Pi 4 USB-C 5V power supply | 5,500 | Or any 5V/3A USB-C charger (iPhone 20W brick works) |
 | Night Vision Fisheye Camera 5MP 160° (OV5647) | 25,000 | 15-pin CSI ribbon |
 | USB Sound Card (USB→3.5mm) | 3,000 | Plugs into any Pi USB-A port |
-| Mini 2-wire microphone | 500 | Solder to a 3.5mm plug (or use a pre-made mic) |
+| Mini 2-wire microphone | 500 | Solder a 3.5mm plug onto it, or skip and use a USB headset mic |
 | Mono 5W audio amplifier board | 1,250 | Powered from Pi 5V GPIO |
 | Harman Kardon 1.5" 40mm 4Ω 3W speaker | 5,000 | 2 wires to the amp output |
 | **Subtotal** | **~40,250** | ~$31 USD |
 
-You also need: a microSD card (≥16 GB), a USB SD-card reader, and your laptop with Wi-Fi.
+Plus: microSD card ≥16 GB, a USB SD-card reader, your laptop with Wi-Fi.
 
 ---
 
-## Hardware assembly
+## Wiring
 
-### 0. Safety
+```
+                 ┌─────────────────────────────┐
+                 │        Raspberry Pi 4       │
+                 │                             │
+  USB-C ◄───── 5V/3A power supply              │
+                 │                             │
+  CSI  ◄───── Fisheye camera (15-pin ribbon)   │
+                 │                             │
+  USB-A ◄───── USB Sound Card                  │
+                 │   │                         │
+                 │   ├─pink jack ──── Mini mic │
+                 │   │                         │
+                 │   └─green jack ──┐          │
+                 │                  │          │
+  GPIO 5V (pin 2) ──────────────┐   │          │
+  GPIO GND (pin 6) ─────────┐   │   │          │
+                 │          │   │   │          │
+                 └──────────┼───┼───┼──────────┘
+                            ▼   ▼   ▼
+                       ┌─────────────────┐
+                       │  Mono 5W amp    │
+                       │  VCC GND IN+ IN-│
+                       │   SPK+    SPK-  │
+                       └────┬───────┬────┘
+                            │       │
+                            ▼       ▼
+                      Harman Kardon speaker
+                          4Ω 3W
+```
 
-- **Always power OFF the Pi before plugging or unplugging the camera ribbon.** Hot-plugging the CSI ribbon can short the camera connector.
-- The Pi 4 USB-C port is **power-only** — you cannot use it as a USB data port to a computer.
-- Treat the Pi gently: the CSI ribbon clip is fragile.
+### Step-by-step
 
-### 1. Power supply (Pi 4 USB-C)
+**Safety first**
 
-1. Plug the USB-C end of the ecity 5,500 IQD power supply (or any 5V/3A USB-C charger such as a 20W iPhone brick) into the **USB-C port** of the Pi.
-2. Don't power it on yet — finish wiring first.
+- Always power **OFF** the Pi before plugging or unplugging the camera ribbon.
+- The Pi 4 USB-C port is power-only — you cannot use it as a USB data port.
+- The CSI ribbon clip is fragile — lift it gently.
 
-### 2. Camera (Night Vision Fisheye 5MP)
+**1. Camera**
 
-The Pi 4 has a **15-pin CSI ribbon connector** between the HDMI ports and the headphone jack. The fisheye camera kit usually ships with the ribbon already attached.
+The Pi 4's CSI connector is between the HDMI ports and the headphone jack.
 
-1. With the Pi powered off, gently lift the small **plastic clip** on the camera connector (pull up at the corners with a fingernail).
-2. Slide the ribbon in with **silver/copper contacts facing the HDMI ports**, blue plastic backing facing the USB ports.
-3. Push the plastic clip back down to lock it.
-4. Repeat the same procedure on the camera board side.
-5. (Optional) Connect the two infrared LEDs to the small 3-pin header on the camera if you bought them — for night-vision in dark rooms.
+1. With the Pi powered off, gently lift the small plastic clip on the camera connector by pulling up at the two corners with a fingernail.
+2. Slide the ribbon in with **silver/copper contacts facing the HDMI ports**, blue plastic facing the USB ports.
+3. Push the clip back down to lock it.
+4. Repeat on the camera board side.
 
-### 3. Microphone (via USB sound card)
+**2. Microphone via USB sound card**
 
-The ecity USB sound card has two 3.5mm jacks (pink = mic in, green = headphone out).
+The USB sound card has two 3.5 mm jacks: **pink = mic in**, **green = audio out**.
 
-1. Plug the **USB sound card** into any USB-A port on the Pi.
-2. Plug the **mini microphone** into the **pink** 3.5mm jack of the sound card.
-   - The 2-wire mini element from ecity needs a 3.5mm mono plug soldered on (tip = signal, sleeve = ground). If you'd rather skip soldering: any USB headset with a built-in mic plugged directly into the Pi works.
+1. Plug the USB sound card into any Pi USB-A port.
+2. Plug the microphone into the **pink** jack.
+   - The 2-wire mini element from ecity needs a 3.5 mm mono plug soldered on (tip = signal, sleeve = ground). If you'd rather skip the soldering, any USB headset with a built-in mic plugged directly into the Pi works.
 
-### 4. Speaker + amplifier
+**3. Speaker + amplifier**
 
-The mono 5W amplifier board has 4 input pads (VCC, GND, audio +, audio −) and 2 output pads (SPK+, SPK−).
+The mono 5 W amp board has 4 input pads (`VCC`, `GND`, `IN+`, `IN-`) and 2 output pads (`SPK+`, `SPK-`).
 
-1. **Power the amp from the Pi GPIO header** (top-left 40-pin block on the Pi):
-   - **GPIO pin 2** (5V) → amp **VCC**
+1. **Power the amp from the Pi GPIO header** (the 40-pin block in the top-left of the Pi):
+   - **GPIO pin 2** (5 V) → amp **VCC**
    - **GPIO pin 6** (GND) → amp **GND**
-2. **Audio input from the sound card:**
-   - Use a 3.5mm-jack-to-2-wire pigtail to take audio from the **green** jack of the sound card.
-   - Connect the wire's signal (tip) to the amp's **IN+**
-   - Connect the wire's ground (sleeve) to the amp's **IN−**
-3. **Output to the speaker:**
-   - Amp **SPK+** → red (or marked +) terminal of the Harman Kardon speaker
-   - Amp **SPK−** → black (or marked −) terminal
+2. **Audio input from the sound card**:
+   - Use a 3.5 mm-jack-to-2-wire pigtail.
+   - Wire signal (tip) → amp **IN+**
+   - Wire ground (sleeve) → amp **IN-**
+3. **Output to the speaker**:
+   - Amp **SPK+** → speaker red (+)
+   - Amp **SPK-** → speaker black (-)
 4. Mount the speaker so the cone faces outward.
 
-```
-    Pi 4 USB-A ──── USB Sound Card ── pink jack ──── 2-wire MIC
-                                  └── green jack ──── 5W amp IN ──── Speaker (4Ω 3W)
-    Pi 4 GPIO 5V/GND ─────────────────── 5W amp VCC/GND
-    Pi 4 CSI ──────── Camera Module 3 / Fisheye
-    Pi 4 USB-C ────── 5V/3A power
-```
-
-### 5. Final check before first power-on
+**4. Sanity check before first power-on**
 
 - [ ] Camera ribbon is locked into the CSI connector
 - [ ] USB sound card is plugged in
-- [ ] Mic is in the pink jack
-- [ ] Amp VCC/GND are on GPIO pin 2 / pin 6 (not 1 or 14 — those are 3.3V / different)
+- [ ] Mic is in the **pink** jack
+- [ ] Amp `VCC`/`GND` are on GPIO **pin 2** and **pin 6** (not 1 or 14 — those are 3.3V)
 - [ ] Speaker leads are not shorted to each other
-- [ ] SD card with Raspberry Pi OS Bookworm is inserted (we'll prep that next)
+- [ ] microSD with Raspberry Pi OS is inserted
 
 ---
 
-## Software setup on the Pi
+## Software setup
 
 ### 1. Flash the SD card
 
 On your laptop:
 
 1. Install [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
-2. CHOOSE DEVICE → Raspberry Pi 4. CHOOSE OS → Raspberry Pi OS 64-bit. CHOOSE STORAGE → your SD card.
-3. Click NEXT → EDIT SETTINGS:
+2. **CHOOSE DEVICE** → Raspberry Pi 4
+3. **CHOOSE OS** → Raspberry Pi OS (64-bit)
+4. **CHOOSE STORAGE** → your microSD
+5. Click **NEXT** → **EDIT SETTINGS**:
    - Hostname: `buddy`
-   - Username: `pi`, password: pick something you'll remember
-   - Wireless LAN: SSID + password of the network the Pi should join (same network your laptop is on, or your phone's hotspot)
+   - Username: `pi`, password: pick something memorable
+   - Wireless LAN: the SSID + password of the network your Pi will join
    - Wireless LAN country: `IQ`
    - Time zone: `Asia/Baghdad`
-   - Enable SSH (password auth)
-4. SAVE → YES → wait for "Write Successful".
+   - Services tab → enable **SSH** (password auth)
+6. **SAVE** → **YES** → wait for "Write Successful"
 
-### 2. Boot the Pi
+### 2. First boot
 
-1. Slot the SD card back into the Pi.
-2. Plug the USB-C power supply in.
-3. Wait ~60 seconds for first boot (it expands the filesystem and joins Wi-Fi).
-4. From your laptop on the **same Wi-Fi** as the Pi:
+1. Slot SD card into the Pi, plug USB-C power in.
+2. Wait ~60 s for first boot.
+3. From a device on the same Wi-Fi: `ping buddy.local` — should reply.
+4. `ssh pi@buddy.local` and enter the password you set.
 
-```bash
-ping buddy.local
-```
-
-If that replies, SSH in:
-
-```bash
-ssh pi@buddy.local
-```
-
-### 3. Install Buddy (one-shot script)
-
-On the Pi (over SSH), run:
+### 3. Install Buddy
 
 ```bash
 curl -L https://raw.githubusercontent.com/Abdalkaderdev/Buddy/main/apps/buddy/scripts/setup_pi.sh | bash
 ```
 
-or copy `apps/buddy/scripts/setup_pi.sh` to the Pi and run `bash setup_pi.sh`. The script:
-
-- Installs Python, OpenCV deps, ffmpeg, ALSA, libcamera
-- Creates a venv at `~/buddy-venv`
-- Installs Buddy and all dependencies
-- Creates a `buddy.service` systemd unit so Buddy starts at boot
+The script installs system packages, creates a venv, installs Buddy, and sets up `buddy.service` as a systemd unit that starts at boot.
 
 ### 4. Add your API key
 
@@ -157,17 +149,17 @@ chmod 600 ~/.buddy.env
 systemctl --user restart buddy.service
 ```
 
-### 5. Open Buddy from any phone or laptop
+### 5. Talk to Buddy
 
-On the same Wi-Fi: open `http://buddy.local:8080`.
+From any device on the same Wi-Fi, open <http://buddy.local:8080>, click the purple mic, and talk.
 
-Click the big purple mic and talk. Buddy listens, thinks, talks back, and (if the camera is wired) knows whether you're in the room.
+Use Chrome or Edge — Firefox's speech recognition is unreliable.
 
 ---
 
-## Quick start (laptop / simulator, no Pi needed)
+## Run on your laptop (no Pi needed)
 
-If you want to develop on your laptop before the Pi parts arrive:
+For dev work before the Pi parts arrive:
 
 ```bash
 # From the repo root
@@ -175,41 +167,7 @@ If you want to develop on your laptop before the Pi parts arrive:
 .venv/bin/python -m buddy.server              # macOS / Linux
 ```
 
-Then open <http://localhost:8080>. The robot motion calls will fail gracefully — Buddy still chats, sees you on the webcam, and talks.
-
----
-
-## Commands
-
-| Command | Description |
-|---|---|
-| `/enroll <name>` | (CLI mode) teach Buddy a face |
-| `/faces` | List enrolled faces |
-| `quit` | Exit |
-
----
-
-## Configuration
-
-Edit `apps/buddy/buddy/config.py`:
-
-| Variable | Purpose |
-|---|---|
-| `LLM_PROVIDER` | `"claude"` (API) or `"ollama"` (local) |
-| `CLAUDE_MODEL` | default: `claude-haiku-4-5-20251001` |
-| `OLLAMA_MODEL` | default: `qwen2.5:3b` |
-| `SYSTEM_PROMPT` | Buddy's personality |
-| `TTS_VOICE` | default voice code |
-| `WHISPER_MODEL` | `tiny` / `base` / `small` / `medium` / `large` |
-| `FACE_DETECTION_INTERVAL` | seconds between camera checks |
-
-Server-side env vars:
-
-| Var | Default | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | unset | Claude API key |
-| `BUDDY_CAMERA` | `1` | set `0` to disable the camera worker |
-| `BUDDY_CAMERA_INDEX` | `0` | which `/dev/videoN` to use |
+Buddy still chats, sees your laptop webcam, and talks. The motion calls (for a future Reachy Mini) just fail silently.
 
 ---
 
@@ -220,40 +178,43 @@ apps/buddy/
 ├── README.md            # this file
 ├── pyproject.toml
 ├── scripts/
-│   └── setup_pi.sh      # one-shot Raspberry Pi installer
+│   └── setup_pi.sh      # one-shot Pi installer
 └── buddy/
-    ├── __init__.py
-    ├── main.py          # CLI entry point
     ├── server.py        # FastAPI + WebSocket web UI
     ├── ai.py            # Claude / Ollama provider
     ├── audio.py         # Whisper STT + Edge TTS
-    ├── vision.py        # OpenCV face detection + recognition
-    ├── motion.py        # Optional Reachy Mini motion
-    ├── config.py        # All settings
+    ├── vision.py        # OpenCV face detection
+    ├── motion.py        # (optional) physical motion
+    ├── config.py        # personality + settings
     ├── data/            # SQLite face DB (gitignored)
-    └── static/          # index.html + main.js + style.css
+    └── static/          # web UI (HTML/CSS/JS)
 ```
 
 ---
 
-## Actions
+## Configuration
 
-Buddy can include any of these in its reply (Claude emits `[ACTION:name]` tags
-that the server parses and either sends to the robot or animates in the UI):
+Edit `buddy/config.py`:
 
-| Action | Effect |
+| Setting | Default |
 |---|---|
-| `nod`, `shake` | head yes / no |
-| `look_up`, `look_down` | pitch |
-| `spin` | big yaw swing |
-| `dance` | rhythmic head + antennas |
-| `curious` | head tilt |
-| `giggle` | quick shaky head |
-| `perk_antennas`, `droop_antennas` | antenna emotion |
+| `LLM_PROVIDER` | `"claude"` (or `"ollama"`) |
+| `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` |
+| `SYSTEM_PROMPT` | Buddy's personality |
+| `TTS_VOICE` | `en-IE-ConnorNeural` |
+| `WHISPER_MODEL` | `base` |
+| `FACE_DETECTION_INTERVAL` | seconds between camera checks |
+
+Server env vars:
+
+| Var | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude API key |
+| `BUDDY_CAMERA` | `0` disables the camera worker |
+| `BUDDY_CAMERA_INDEX` | which `/dev/videoN` to use (default 0) |
 
 ---
 
 ## License
 
-MIT for the Buddy app. The Reachy Mini SDK it builds on is Apache 2.0;
-the hardware design files (3D prints) are CC BY-SA-NC by Pollen Robotics.
+MIT.
