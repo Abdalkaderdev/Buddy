@@ -1,5 +1,12 @@
 # Reachy Mini Development Guide for AI Agents
 
+> 🚨 **NEW AI SESSION? READ [`HANDOFF.md`](./HANDOFF.md) FIRST.**
+> This repo is being used by Abdalkader to build the **Buddy** companion robot.
+> `HANDOFF.md` captures the project state, decisions, credentials, and pending
+> tasks from prior sessions — read it before doing anything else.
+
+---
+
 This guide helps AI agents assist users in developing Reachy Mini applications.
 
 ---

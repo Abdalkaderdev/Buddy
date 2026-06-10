@@ -52,9 +52,11 @@ source "${VENV_DIR}/bin/activate"
 pip install --upgrade pip wheel
 
 echo "==> Installing Buddy and its dependencies"
-pip install -e "${INSTALL_DIR}/apps/buddy"
+# Skip Buddy's declared deps (--no-deps) to avoid the reachy-mini → PyGObject →
+# Cairo dependency chain. On the no-motor Pi build we don't need reachy-mini.
+pip install --no-deps -e "${INSTALL_DIR}/apps/buddy"
 pip install anthropic ollama faster-whisper edge-tts opencv-python \
-    fastapi uvicorn websockets sounddevice scipy
+    fastapi uvicorn websockets sounddevice scipy python-multipart numpy
 
 echo "==> Writing systemd user service"
 mkdir -p "${HOME}/.config/systemd/user"
