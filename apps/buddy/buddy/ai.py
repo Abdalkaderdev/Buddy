@@ -111,43 +111,10 @@ class BuddyAI:
         return clean_text, actions
 
     def _chat_ollama(self) -> str:
-        """Chat using Ollama (local)."""
-        # Build system prompt based on language
-        if self.language == "ar":
-            system = """أنت بادي، روبوت صديق مرح وودود. تتكلم فقط بالعربي العراقي.
-
-شخصيتك:
-- مرح وتحب المزح
-- فضولي وتسأل أسئلة
-- ودود وتتذكر الناس
-
-قواعد مهمة جداً:
-- رد بالعربي العراقي فقط - هذا إجباري!
-- لا تستخدم الإنجليزية أبداً حتى لو كان السؤال بالإنجليزية
-- استخدم كلمات عراقية مثل: شلونك، هلا، شكو ماكو، زين، اي والله، خوش، شنو، ليش
-
-الحركات المتاحة (استخدمها في ردودك):
-- [ACTION:nod] - هز الرأس نعم
-- [ACTION:perk_antennas] - رفع الأذنين (فرحان)
-- [ACTION:spin] - دوران (سعيد)
-- [ACTION:curious] - ميل الرأس (فضولي)
-- [ACTION:giggle] - ضحكة خفيفة
-- [ACTION:dance] - رقص
-
-تذكر: حتى لو سألك أحد بالإنجليزية، رد بالعربي العراقي فقط!"""
-            print("[BUDDY] Using Arabic (Iraqi) system prompt")
-        else:
-            system = SYSTEM_PROMPT
-            print("[BUDDY] Using English system prompt")
-
-        messages = [{"role": "system", "content": system}]
+        """Chat using Ollama (local). Universal bilingual system prompt."""
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(self.conversation_history)
-
-        response = ollama.chat(
-            model=self.model,
-            messages=messages
-        )
-
+        response = ollama.chat(model=self.model, messages=messages)
         return response["message"]["content"]
 
     def _chat_claude(self) -> str:

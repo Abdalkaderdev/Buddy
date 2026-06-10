@@ -1,300 +1,379 @@
-// WebSocket connection
-let ws = null;
-let isConnected = false;
+/* ==========================================================
+   Buddy — companion robot front-end
+   Voice-first. Arabic-default. Presence orb instead of avatar.
+   Preserves: WS to /ws, Web Speech API, base64 mp3 autoplay,
+              auto-listen after reply, voice picker, reset, quick actions.
+   ========================================================== */
 
-// DOM elements
-const messagesContainer = document.getElementById('messages');
-const messageInput = document.getElementById('messageInput');
-const statusElement = document.getElementById('status');
-const robotAvatar = document.getElementById('robotAvatar');
+// ----- State -----
+const state = {
+    ws: null,
+    connected: false,
+    voiceEnabled: true,
+    isListening: false,
+    isSpeaking: false,
+    currentVoice: 'ar-iq-female',
+    currentLang: 'ar-IQ',
+    uiLang: 'ar',
+    autoListenAfterReply: true,
+    voices: null,
+    exchanges: [], // {role, content, actions?, el}
+    maxExchanges: 6, // 3 turns ≈ 6 cards
+};
 
-// Connect to WebSocket
+const audioPlayer = new Audio();
+let recognition = null;
+
+// ----- Voice catalog (static; server sends authoritative VOICES on connect) -----
+const VOICE_CATALOG = [
+    { key: 'ar-iq-female', name: { ar: 'رنا', en: 'Rana' },     meta: { ar: 'عراقية',  en: 'Iraqi Arabic' },    lang: 'ar-IQ' },
+    { key: 'ar-iq-male',   name: { ar: 'باسل', en: 'Bassel' },  meta: { ar: 'عراقي',   en: 'Iraqi Arabic' },    lang: 'ar-IQ' },
+    { key: 'ar-eg-female', name: { ar: 'سلمى', en: 'Salma' },   meta: { ar: 'مصرية',   en: 'Egyptian Arabic' }, lang: 'ar-EG' },
+    { key: 'ar-eg-male',   name: { ar: 'شاكر', en: 'Shakir' },  meta: { ar: 'مصري',    en: 'Egyptian Arabic' }, lang: 'ar-EG' },
+    { key: 'ar-sa-female', name: { ar: 'زارا', en: 'Zara' },    meta: { ar: 'خليجية',  en: 'Saudi Arabic' },    lang: 'ar-SA' },
+    { key: 'ar-sa-male',   name: { ar: 'حمد',  en: 'Hamed' },   meta: { ar: 'خليجي',   en: 'Saudi Arabic' },    lang: 'ar-SA' },
+    { key: 'en-us-female', name: { ar: 'آريا', en: 'Aria' },    meta: { ar: 'أمريكية', en: 'US English' },       lang: 'en-US' },
+    { key: 'en-us-male',   name: { ar: 'غاي',  en: 'Guy' },     meta: { ar: 'أمريكي',  en: 'US English' },       lang: 'en-US' },
+    { key: 'en-gb-female', name: { ar: 'سونيا', en: 'Sonia' },  meta: { ar: 'بريطانية', en: 'UK English' },      lang: 'en-GB' },
+    { key: 'en-gb-male',   name: { ar: 'رايان', en: 'Ryan' },   meta: { ar: 'بريطاني',  en: 'UK English' },      lang: 'en-GB' },
+    { key: 'en-aussie',    name: { ar: 'ناتاشا', en: 'Natasha' }, meta: { ar: 'أسترالية', en: 'Australian' },    lang: 'en-AU' },
+    { key: 'en-funny',     name: { ar: 'كونور', en: 'Connor' }, meta: { ar: 'أيرلندي',  en: 'Irish' },           lang: 'en-IE' },
+];
+
+// ----- i18n -----
+const STRINGS = {
+    ar: {
+        brand: 'بَدي',
+        connecting: 'يتصل…',
+        online: 'متصل',
+        offline: 'غير متصل',
+        reconnecting: 'يحاول الاتصال…',
+        tapToTalk: 'اضغط للحديث مع بَدي',
+        listening: 'يسمعك… اضغط لتوقف',
+        speaking: 'يتحدث بَدي',
+        thinking: 'يفكّر…',
+        micUnsupported: 'يحتاج مايك Chrome أو Edge',
+        settings: 'الإعدادات',
+        voice: 'الصوت',
+        interface: 'لغة الواجهة',
+        langNote: 'تتبع الواجهة لغة الصوت المختار.',
+        reset: 'امسح المحادثة',
+        madeIn: 'صُنع في أربيل',
+        suggest1: 'احكِ لي نكتة',
+        suggest2: 'كيف حالك اليوم؟',
+        suggest3: 'لِف لفّة فرح',
+    },
+    en: {
+        brand: 'Buddy',
+        connecting: 'Connecting…',
+        online: 'Online',
+        offline: 'Offline',
+        reconnecting: 'Reconnecting…',
+        tapToTalk: 'Tap to talk to Buddy',
+        listening: 'Listening… tap to stop',
+        speaking: 'Buddy is speaking',
+        thinking: 'Thinking…',
+        micUnsupported: 'Voice needs Chrome or Edge',
+        settings: 'Settings',
+        voice: 'Voice',
+        interface: 'Interface language',
+        langNote: 'The interface follows the selected voice.',
+        reset: 'Clear conversation',
+        madeIn: 'Made in Erbil',
+        suggest1: 'Tell me a joke',
+        suggest2: 'How are you?',
+        suggest3: 'Do a happy spin',
+    },
+};
+
+// ----- DOM -----
+const $ = (id) => document.getElementById(id);
+const dom = {
+    body: document.body,
+    status: $('status'),
+    statusPill: $('statusPill'),
+    micBtn: $('micBtn'),
+    micHint: $('micHint'),
+    transcript: $('liveTranscript'),
+    exchange: $('exchange'),
+    suggestions: $('suggestions'),
+    settingsBtn: $('settingsBtn'),
+    closeSheet: $('closeSheet'),
+    sheet: $('settingsSheet'),
+    sheetBackdrop: $('sheetBackdrop'),
+    voiceGrid: $('voiceGrid'),
+    resetBtn: $('resetBtn'),
+    langToggle: document.querySelectorAll('.lang-opt'),
+};
+
+// ----- Presence state -----
+function setState(s) {
+    dom.body.dataset.state = s;
+    const t = STRINGS[state.uiLang];
+    if (s === 'listening')      dom.micHint.textContent = t.listening;
+    else if (s === 'speaking')  dom.micHint.textContent = t.speaking;
+    else if (s === 'thinking')  dom.micHint.textContent = t.thinking;
+    else                        dom.micHint.textContent = t.tapToTalk;
+}
+
+function setActionMood(mood) {
+    if (!mood) {
+        delete dom.body.dataset.action;
+        return;
+    }
+    dom.body.dataset.action = mood;
+    setTimeout(() => { delete dom.body.dataset.action; }, 2400);
+}
+
+// ----- i18n + direction -----
+function applyLang(lang) {
+    state.uiLang = lang;
+    const html = document.documentElement;
+    html.lang = lang;
+    html.dir = lang === 'ar' ? 'rtl' : 'ltr';
+
+    const t = STRINGS[lang];
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.dataset.i18n;
+        if (t[key]) el.textContent = t[key];
+    });
+
+    // Update suggestion chips with localized labels (data-ar / data-en)
+    document.querySelectorAll('.chip').forEach(chip => {
+        const v = chip.dataset[lang];
+        if (v) chip.textContent = v;
+    });
+
+    // Status text based on state
+    if (state.connected) dom.status.textContent = t.online;
+
+    // Active lang toggle
+    dom.langToggle.forEach(b => {
+        b.classList.toggle('is-active', b.dataset.lang === lang);
+    });
+
+    // Refresh voice grid labels
+    renderVoiceGrid();
+    setState(dom.body.dataset.state || 'idle');
+}
+
+// ----- WebSocket -----
 function connect() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    state.ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
-    ws.onopen = () => {
-        isConnected = true;
-        statusElement.textContent = 'Online';
-        statusElement.classList.add('online');
-        console.log('Connected to Buddy!');
+    state.ws.onopen = () => {
+        state.connected = true;
+        dom.statusPill.classList.add('is-online');
+        dom.status.textContent = STRINGS[state.uiLang].online;
     };
 
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
+    state.ws.onmessage = (event) => {
+        let data;
+        try { data = JSON.parse(event.data); } catch { return; }
         handleMessage(data);
     };
 
-    ws.onclose = () => {
-        isConnected = false;
-        statusElement.textContent = 'Disconnected - Reconnecting...';
-        statusElement.classList.remove('online');
-        // Reconnect after 2 seconds
+    state.ws.onclose = () => {
+        state.connected = false;
+        dom.statusPill.classList.remove('is-online');
+        dom.status.textContent = STRINGS[state.uiLang].reconnecting;
         setTimeout(connect, 2000);
     };
 
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-    };
+    state.ws.onerror = (err) => console.error('WS error:', err);
 }
 
-// Audio player
-let audioPlayer = new Audio();
-let voiceEnabled = true;
-
-// Handle incoming messages
 function handleMessage(data) {
     if (data.type === 'message') {
-        addMessage(data.content, data.role, data.actions);
-
-        // Animate robot based on actions
-        if (data.actions && data.actions.length > 0) {
-            animateRobot(data.actions);
-        }
-
-        // Play audio if available
-        if (data.audio && voiceEnabled) {
-            playAudio(data.audio);
-        }
+        // Buddy's reply
+        if (dom.body.dataset.state === 'thinking') setState('idle');
+        addCard(data.role || 'assistant', data.content, data.actions || []);
+        if (data.actions && data.actions.length) animateActions(data.actions);
+        if (data.audio && state.voiceEnabled) playAudio(data.audio);
     } else if (data.type === 'system') {
-        addSystemMessage(data.content);
-        // Play audio for system messages too (voice change confirmation)
-        if (data.audio && voiceEnabled) {
-            playAudio(data.audio);
-        }
+        addCard('system', data.content);
+        if (data.audio && state.voiceEnabled) playAudio(data.audio);
     } else if (data.type === 'voices') {
-        // Could update dropdown dynamically, but we hardcoded it
-        console.log('Available voices:', data.voices);
+        state.voices = data.voices;
+        renderVoiceGrid();
     }
 }
 
-// Play base64 encoded audio
-function playAudio(base64Audio) {
+// ----- Audio playback -----
+function playAudio(b64) {
     try {
-        audioPlayer.src = `data:audio/mp3;base64,${base64Audio}`;
-
-        // Start talking animation
-        startTalking();
+        audioPlayer.src = `data:audio/mp3;base64,${b64}`;
+        state.isSpeaking = true;
+        setState('speaking');
 
         audioPlayer.onended = () => {
-            stopTalking();
+            state.isSpeaking = false;
+            setState('idle');
+            if (state.autoListenAfterReply && recognition && !state.isListening) {
+                setTimeout(() => startListening(), 380);
+            }
         };
 
         audioPlayer.play().catch(e => {
-            console.log('Audio autoplay blocked, click to enable');
-            stopTalking();
+            console.log('Audio autoplay blocked:', e);
+            state.isSpeaking = false;
+            setState('idle');
         });
     } catch (e) {
         console.error('Audio playback error:', e);
-        stopTalking();
+        state.isSpeaking = false;
+        setState('idle');
     }
 }
 
-// Toggle voice
-function toggleVoice() {
-    voiceEnabled = !voiceEnabled;
-    const btn = document.getElementById('voiceBtn');
-    if (btn) {
-        btn.textContent = voiceEnabled ? '🔊 Voice On' : '🔇 Voice Off';
-    }
-}
+// ----- Exchange cards -----
+function addCard(role, content, actions = []) {
+    const card = document.createElement('div');
+    card.className = 'card card--' + (role === 'user' ? 'user' : role === 'system' ? 'system' : 'buddy');
+    card.textContent = content;
 
-// Change voice/language
-function changeVoice(voiceKey) {
-    if (!isConnected) return;
-
-    ws.send(JSON.stringify({
-        type: 'set_voice',
-        voice: voiceKey
-    }));
-}
-
-// Add a chat message
-function addMessage(content, role, actions = []) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role === 'user' ? 'user' : 'assistant'}`;
-
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-
-    if (role === 'user') {
-        avatar.textContent = '👤';
-    } else {
-        // Create mini animated Buddy avatar
-        avatar.innerHTML = `
-            <div class="mini-buddy" id="miniBuddy${Date.now()}">
-                <div class="mini-antenna left"></div>
-                <div class="mini-antenna right"></div>
-                <div class="mini-face">
-                    <div class="mini-eye left"></div>
-                    <div class="mini-eye right"></div>
-                </div>
-            </div>
-        `;
-    }
-
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
-    contentDiv.textContent = content;
-
-    // Add action tags if present
-    if (actions && actions.length > 0) {
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'message-actions';
-        actions.forEach(action => {
+    if (actions && actions.length && role !== 'system') {
+        const wrap = document.createElement('div');
+        wrap.className = 'card-actions';
+        actions.forEach(a => {
             const tag = document.createElement('span');
             tag.className = 'action-tag';
-            tag.textContent = formatAction(action);
-            actionsDiv.appendChild(tag);
+            tag.textContent = formatAction(a);
+            wrap.appendChild(tag);
         });
-        contentDiv.appendChild(actionsDiv);
+        card.appendChild(wrap);
     }
 
-    messageDiv.appendChild(avatar);
-    messageDiv.appendChild(contentDiv);
-    messagesContainer.appendChild(messageDiv);
+    dom.exchange.appendChild(card);
+    state.exchanges.push({ role, el: card });
 
-    // Scroll to bottom
-    scrollToBottom();
-}
-
-// Add system message
-function addSystemMessage(content) {
-    const div = document.createElement('div');
-    div.className = 'system-message';
-    div.textContent = content;
-    messagesContainer.appendChild(div);
-    scrollToBottom();
-}
-
-// Add typing indicator
-function showTyping() {
-    const typingDiv = document.createElement('div');
-    typingDiv.className = 'message assistant';
-    typingDiv.id = 'typing-indicator';
-
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    avatar.textContent = '🤖';
-
-    const typing = document.createElement('div');
-    typing.className = 'typing';
-    typing.innerHTML = '<span></span><span></span><span></span>';
-
-    typingDiv.appendChild(avatar);
-    typingDiv.appendChild(typing);
-    messagesContainer.appendChild(typingDiv);
-    scrollToBottom();
-}
-
-// Remove typing indicator
-function hideTyping() {
-    const typing = document.getElementById('typing-indicator');
-    if (typing) typing.remove();
-}
-
-// Format action name for display
-function formatAction(action) {
-    const actionMap = {
-        'nod': '✓ Nodding',
-        'shake': '✗ Shaking head',
-        'look_up': '👆 Looking up',
-        'look_down': '👇 Looking down',
-        'perk_antennas': '📡 Perking up',
-        'droop_antennas': '😔 Drooping',
-        'spin': '🔄 Spinning',
-        'curious': '🤔 Curious tilt'
-    };
-    return actionMap[action] || action;
-}
-
-// Animate robot avatar based on actions
-function animateRobot(actions) {
-    // Reset classes
-    robotAvatar.className = 'robot-avatar';
-
-    actions.forEach(action => {
-        if (action === 'perk_antennas') {
-            robotAvatar.classList.add('perk');
-        } else if (action === 'droop_antennas') {
-            robotAvatar.classList.add('droop');
-        } else if (action === 'curious') {
-            robotAvatar.classList.add('curious');
-        }
+    // Fade older
+    const visible = state.exchanges.slice(-state.maxExchanges);
+    state.exchanges.forEach((ex, idx) => {
+        const distFromEnd = state.exchanges.length - 1 - idx;
+        ex.el.classList.remove('fading', 'faded');
+        if (distFromEnd >= state.maxExchanges) ex.el.remove();
+        else if (distFromEnd >= 4) ex.el.classList.add('faded');
+        else if (distFromEnd >= 2) ex.el.classList.add('fading');
     });
+    state.exchanges = state.exchanges.filter(ex => ex.el.isConnected);
 
-    // Reset after animation
-    setTimeout(() => {
-        robotAvatar.className = 'robot-avatar';
-    }, 2000);
-
-    // Also animate floating buddy
-    animateFloatingBuddy(actions);
-}
-
-// Animate the floating Buddy avatar
-function animateFloatingBuddy(actions) {
-    const floatingBuddy = document.getElementById('floatingBuddy');
-    if (!floatingBuddy) return;
-
-    // Reset classes
-    floatingBuddy.className = 'floating-buddy';
-
-    actions.forEach(action => {
-        if (action === 'perk_antennas' || action === 'look_up' || action === 'spin') {
-            floatingBuddy.classList.add('excited');
-        } else if (action === 'droop_antennas' || action === 'look_down') {
-            floatingBuddy.classList.add('sad');
-        }
+    // Scroll to newest
+    requestAnimationFrame(() => {
+        dom.exchange.scrollTop = dom.exchange.scrollHeight;
     });
-
-    // Reset after animation
-    setTimeout(() => {
-        floatingBuddy.className = 'floating-buddy';
-    }, 3000);
 }
 
-// Make buddy talk while audio plays
-function startTalking() {
-    const floatingBuddy = document.getElementById('floatingBuddy');
-    if (floatingBuddy) {
-        floatingBuddy.classList.add('talking');
+const ACTION_LABELS = {
+    nod:             { ar: 'يومئ', en: 'Nodding' },
+    shake:           { ar: 'يهز رأسه',   en: 'Shaking head' },
+    look_up:         { ar: 'ينظر فوق',   en: 'Looking up' },
+    look_down:       { ar: 'ينظر تحت',   en: 'Looking down' },
+    perk_antennas:   { ar: 'منتبه',      en: 'Perked up' },
+    droop_antennas:  { ar: 'حزين',       en: 'Drooping' },
+    spin:            { ar: 'يلف',        en: 'Spinning' },
+    curious:         { ar: 'فضولي',      en: 'Curious' },
+};
+
+function formatAction(a) {
+    const l = ACTION_LABELS[a];
+    if (!l) return a;
+    return l[state.uiLang] || l.en;
+}
+
+function animateActions(actions) {
+    let mood = null;
+    actions.forEach(a => {
+        if (['perk_antennas', 'look_up', 'spin', 'nod'].includes(a)) mood = 'excited';
+        else if (['droop_antennas', 'look_down'].includes(a)) mood = 'sad';
+    });
+    if (mood) setActionMood(mood);
+}
+
+// ----- Suggestions / quick chips -----
+function sendQuickMessage(message) {
+    if (!state.connected) return;
+    addCard('user', message);
+    setState('thinking');
+    state.ws.send(JSON.stringify({ type: 'chat', message }));
+}
+
+// ----- Voice grid -----
+function renderVoiceGrid() {
+    const grid = dom.voiceGrid;
+    if (!grid) return;
+    grid.innerHTML = '';
+    VOICE_CATALOG.forEach(v => {
+        const b = document.createElement('button');
+        b.className = 'voice-opt' + (v.key === state.currentVoice ? ' is-active' : '');
+        b.dataset.key = v.key;
+        const name = document.createElement('span');
+        name.className = 'voice-opt-name';
+        name.textContent = v.name[state.uiLang] || v.name.en;
+        const meta = document.createElement('span');
+        meta.className = 'voice-opt-meta';
+        meta.textContent = v.meta[state.uiLang] || v.meta.en;
+        b.appendChild(name);
+        b.appendChild(meta);
+        b.addEventListener('click', () => selectVoice(v.key));
+        grid.appendChild(b);
+    });
+}
+
+function selectVoice(voiceKey) {
+    state.currentVoice = voiceKey;
+    const v = VOICE_CATALOG.find(x => x.key === voiceKey);
+    if (v) {
+        state.currentLang = v.lang;
+        if (recognition) recognition.lang = v.lang;
+        // Switch UI lang based on voice lang prefix
+        const newUiLang = v.lang.startsWith('ar') ? 'ar' : 'en';
+        if (newUiLang !== state.uiLang) applyLang(newUiLang);
+        else renderVoiceGrid();
+    }
+    if (state.connected) {
+        state.ws.send(JSON.stringify({ type: 'set_voice', voice: voiceKey }));
     }
 }
 
-function stopTalking() {
-    const floatingBuddy = document.getElementById('floatingBuddy');
-    if (floatingBuddy) {
-        floatingBuddy.classList.remove('talking');
-    }
+// ----- Settings sheet -----
+function openSheet() {
+    dom.sheet.hidden = false;
+    dom.sheetBackdrop.hidden = false;
 }
 
-// ---------------------------------------------------------------
-// Voice input via Web Speech API (Chrome/Edge)
-// ---------------------------------------------------------------
-let recognition = null;
-let isListening = false;
-let currentLang = 'en-US';
-let autoListenAfterReply = true;
+function closeSheet() {
+    dom.sheet.hidden = true;
+    dom.sheetBackdrop.hidden = true;
+}
 
+// ----- Reset -----
+function resetChat() {
+    if (!state.connected) return;
+    state.ws.send(JSON.stringify({ type: 'reset' }));
+    dom.exchange.innerHTML = '';
+    state.exchanges = [];
+    closeSheet();
+}
+
+// ----- Web Speech API -----
 function initSpeechRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
-        document.getElementById('micHint').textContent =
-            '⚠️ Voice input requires Chrome or Edge';
-        document.getElementById('micBtn').disabled = true;
+        dom.micHint.textContent = STRINGS[state.uiLang].micUnsupported;
+        dom.micBtn.disabled = true;
         return;
     }
     recognition = new SR();
     recognition.continuous = false;
     recognition.interimResults = true;
-    recognition.lang = currentLang;
+    recognition.lang = state.currentLang;
 
     recognition.onstart = () => {
-        isListening = true;
-        document.getElementById('micBtn').classList.add('listening');
-        document.getElementById('micHint').textContent = '🎙️ Listening… click again to stop';
-        document.getElementById('liveTranscript').textContent = '';
+        state.isListening = true;
+        setState('listening');
+        dom.transcript.textContent = '';
     };
 
     recognition.onresult = (event) => {
@@ -305,117 +384,86 @@ function initSpeechRecognition() {
             if (event.results[i].isFinal) final += t;
             else interim += t;
         }
-        document.getElementById('liveTranscript').textContent = interim || final;
+        dom.transcript.textContent = interim || final;
         if (final.trim()) sendVoiceText(final.trim());
     };
 
     recognition.onerror = (event) => {
-        document.getElementById('micHint').textContent =
-            `Mic error: ${event.error}. Click to try again.`;
+        console.warn('Recognition error:', event.error);
         stopListening();
     };
 
     recognition.onend = () => {
-        stopListening();
+        if (state.isListening) stopListening();
     };
 }
 
 function startListening() {
-    if (!recognition || isListening) return;
+    if (!recognition || state.isListening || state.isSpeaking) return;
     try {
-        recognition.lang = currentLang;
+        recognition.lang = state.currentLang;
         recognition.start();
     } catch (e) {
-        console.error('Recognition start failed:', e);
+        console.warn('Recognition start failed:', e);
     }
 }
 
 function stopListening() {
-    isListening = false;
-    document.getElementById('micBtn').classList.remove('listening');
-    document.getElementById('micHint').textContent = 'Click the mic and talk to Buddy';
+    state.isListening = false;
+    if (dom.body.dataset.state === 'listening') setState('idle');
     if (recognition) {
         try { recognition.stop(); } catch (e) {}
     }
 }
 
 function toggleListening() {
-    if (isListening) stopListening();
+    if (state.isSpeaking) return;
+    if (state.isListening) stopListening();
     else startListening();
 }
 
 function sendVoiceText(text) {
-    if (!isConnected) return;
-    addMessage(text, 'user');
-    showTyping();
-    document.getElementById('liveTranscript').textContent = '';
-    ws.send(JSON.stringify({ type: 'chat', message: text }));
+    if (!state.connected) return;
+    addCard('user', text);
+    dom.transcript.textContent = '';
+    setState('thinking');
+    state.ws.send(JSON.stringify({ type: 'chat', message: text }));
 }
 
-// ---------------------------------------------------------------
-// Quick action buttons still work — they bypass STT
-// ---------------------------------------------------------------
-function sendQuickMessage(message) {
-    if (!isConnected) return;
-    addMessage(message, 'user');
-    showTyping();
-    ws.send(JSON.stringify({ type: 'chat', message: message }));
+// ----- Wire events -----
+function wire() {
+    dom.micBtn.addEventListener('click', toggleListening);
+
+    dom.settingsBtn.addEventListener('click', openSheet);
+    dom.closeSheet.addEventListener('click', closeSheet);
+    dom.sheetBackdrop.addEventListener('click', closeSheet);
+
+    dom.resetBtn.addEventListener('click', resetChat);
+
+    dom.langToggle.forEach(btn => {
+        btn.addEventListener('click', () => applyLang(btn.dataset.lang));
+    });
+
+    // Suggestion chips: send their localized text
+    dom.suggestions.querySelectorAll('.chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const msg = chip.dataset[state.uiLang] || chip.textContent.trim();
+            sendQuickMessage(msg);
+        });
+    });
+
+    // Escape closes sheet
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !dom.sheet.hidden) closeSheet();
+    });
 }
 
-function resetChat() {
-    if (!isConnected) return;
-    ws.send(JSON.stringify({ type: 'reset' }));
-    messagesContainer.innerHTML = '';
-}
-
-function scrollToBottom() {
-    const chatContainer = document.getElementById('chatContainer');
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-}
-
-// ---------------------------------------------------------------
-// Auto-listen after Buddy finishes speaking (natural conversation)
-// ---------------------------------------------------------------
-const _origPlayAudio = playAudio;
-playAudio = function(b64) {
-    _origPlayAudio(b64);
-    const prevEnd = audioPlayer.onended;
-    audioPlayer.onended = () => {
-        if (prevEnd) prevEnd();
-        if (autoListenAfterReply) {
-            setTimeout(() => startListening(), 400);
-        }
-    };
-};
-
-// Update recognition language when user changes voice
-const _origChangeVoice = changeVoice;
-changeVoice = function(voiceKey) {
-    _origChangeVoice(voiceKey);
-    // map voice prefix → BCP-47 lang for SpeechRecognition
-    const langMap = {
-        'ar-iq': 'ar-IQ', 'ar-eg': 'ar-EG', 'ar-sa': 'ar-SA',
-        'en-funny': 'en-IE', 'en-aussie': 'en-AU',
-        'en-us': 'en-US', 'en-gb': 'en-GB'
-    };
-    for (const [prefix, lang] of Object.entries(langMap)) {
-        if (voiceKey.startsWith(prefix)) {
-            currentLang = lang;
-            if (recognition) recognition.lang = lang;
-            break;
-        }
-    }
-};
-
-// Override handleMessage to hide typing
-const originalHandleMessage = handleMessage;
-handleMessage = function(data) {
-    hideTyping();
-    originalHandleMessage(data);
-};
-
-// Connect on page load
+// ----- Boot -----
 document.addEventListener('DOMContentLoaded', () => {
+    applyLang('ar');
+    setState('idle');
+    renderVoiceGrid();
+    wire();
     connect();
     initSpeechRecognition();
 });

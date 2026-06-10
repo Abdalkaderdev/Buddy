@@ -3,9 +3,30 @@
 import asyncio
 import base64
 import os
+import re
 import tempfile
 import threading
 import time
+
+# Arabic Unicode ranges — used to detect when Claude replied in Arabic so we can
+# pick the right TTS voice regardless of which voice the user selected in the UI.
+_ARABIC_RE = re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
+
+
+def _detect_lang(text: str) -> str:
+    """Return 'ar' if the text contains Arabic script, else 'en'."""
+    return "ar" if _ARABIC_RE.search(text) else "en"
+
+
+def _pick_voice_for_lang(detected: str, current_voice_key: str) -> tuple[str, str]:
+    """If Claude's reply language differs from the current voice's language,
+    fall back to a sane default voice for that language. Returns (key, edge_tts_code)."""
+    current_lang = VOICES.get(current_voice_key, {}).get("lang", "en")
+    if detected == current_lang:
+        return current_voice_key, VOICES[current_voice_key]["code"]
+    # Mismatch — pick a default for the detected language
+    fallback = "ar-iq-female" if detected == "ar" else "en-us-female"
+    return fallback, VOICES[fallback]["code"]
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -253,15 +274,16 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     clients.append(websocket)
 
-    # Default settings for this connection - use funny Irish voice
+    # Default: Iraqi Arabic. Switches language automatically as user speaks.
+    default_voice = "ar-iq-female"
     user_settings[websocket] = {
-        "voice": "en-funny",
-        "voice_code": VOICES["en-funny"]["code"],
-        "lang": "en"
+        "voice": default_voice,
+        "voice_code": VOICES[default_voice]["code"],
+        "lang": VOICES[default_voice]["lang"],
     }
 
-    # Send welcome message
-    welcome_text = "Hey! I'm Buddy, your playful robot companion! How can I help you today?"
+    # Welcome message in Arabic
+    welcome_text = "هلا! أنا بَدي، صديقك الروبوت. شلونك اليوم؟"
     welcome_audio = await text_to_speech(welcome_text, user_settings[websocket]["voice_code"])
     await websocket.send_json({
         "type": "message",
@@ -306,9 +328,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             except Exception as e:
                                 print(f"[SERVER] Action error: {e}")
 
-                    # Generate speech with selected voice
-                    print(f"[SERVER] Generating TTS with voice: {voice_code}")
-                    audio_data = await text_to_speech(response, voice_code)
+                    # Auto-select voice based on Claude's response language so
+                    # an Arabic reply doesn't get spoken by an English voice.
+                    detected = _detect_lang(response)
+                    tts_voice_key, tts_voice_code = _pick_voice_for_lang(detected, voice_key)
+                    if tts_voice_key != voice_key:
+                        print(f"[SERVER] Reply lang={detected} -> override voice to {tts_voice_key}")
+                    print(f"[SERVER] Generating TTS with voice: {tts_voice_code}")
+                    audio_data = await text_to_speech(response, tts_voice_code)
 
                     # Send response back
                     await websocket.send_json({
@@ -363,14 +390,28 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 def main():
-    """Run the web server."""
+    """Run the web server. Uses HTTPS if BUDDY_SSL_CERT / BUDDY_SSL_KEY are set."""
     print("\n" + "=" * 50)
     print("  BUDDY - Web Interface")
     print("=" * 50)
-    print("\nOpen your browser to: http://localhost:8080")
+
+    cert = os.getenv("BUDDY_SSL_CERT")
+    key = os.getenv("BUDDY_SSL_KEY")
+    use_https = bool(cert and key and os.path.exists(cert) and os.path.exists(key))
+    scheme = "https" if use_https else "http"
+
+    print(f"\nOpen your browser to: {scheme}://buddy.local:8080  or  {scheme}://localhost:8080")
+    if use_https:
+        print("(self-signed cert — accept the browser warning the first time)")
+    else:
+        print("(HTTP only — browser will block the microphone unless on localhost)")
     print("Press Ctrl+C to stop\n")
 
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    if use_https:
+        uvicorn.run(app, host="0.0.0.0", port=8080,
+                    ssl_certfile=cert, ssl_keyfile=key)
+    else:
+        uvicorn.run(app, host="0.0.0.0", port=8080)
 
 
 if __name__ == "__main__":
