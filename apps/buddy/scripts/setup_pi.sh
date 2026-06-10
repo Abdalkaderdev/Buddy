@@ -31,11 +31,13 @@ sudo apt-get install -y --no-install-recommends \
     git python3 python3-venv python3-pip python3-dev \
     build-essential cmake pkg-config \
     libjpeg-dev libpng-dev \
-    libatlas-base-dev libopenblas-dev \
+    libopenblas-dev \
     libportaudio2 portaudio19-dev \
     ffmpeg alsa-utils \
-    libcamera-apps v4l-utils \
+    rpicam-apps v4l-utils \
     libgl1 libglib2.0-0
+# Note: libatlas-base-dev was removed in Debian 13; libopenblas-dev replaces it.
+# libcamera-apps was renamed to rpicam-apps in Bookworm 2023+.
 
 echo "==> Cloning / updating the Buddy repo into ${INSTALL_DIR}"
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
