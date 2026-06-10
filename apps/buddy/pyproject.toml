@@ -1,0 +1,31 @@
+[project]
+name = "buddy"
+version = "0.1.0"
+description = "Interactive companion robot with face recognition and AI chat"
+requires-python = ">=3.10"
+dependencies = [
+    "reachy-mini",
+    "ollama",
+    "anthropic",
+    "faster-whisper",
+    "edge-tts",
+    "sounddevice",
+    "scipy",
+    "opencv-python",
+    "numpy",
+    "fastapi",
+    "uvicorn",
+    "websockets",
+    "python-multipart",
+]
+
+[project.optional-dependencies]
+# face_recognition needs dlib + cmake; install only if you want face ID
+recognition = ["face-recognition"]
+
+[project.scripts]
+buddy = "buddy.main:main"
+buddy-server = "buddy.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
