@@ -52,6 +52,31 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "rFDdsCQRZCUL8cPOWtnP")
 ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 _eleven_client = None
 
+# ---- Caches ----
+# TTS cache: same text → same audio. Saves ElevenLabs credits AND makes
+# repeated greetings instant. Bounded LRU.
+import hashlib
+import collections
+_TTS_CACHE: "collections.OrderedDict[str, str]" = collections.OrderedDict()
+_TTS_CACHE_MAX = 80
+
+def _tts_cache_key(text: str, voice_id: str) -> str:
+    return hashlib.sha256(f"{voice_id}::{text}".encode("utf-8")).hexdigest()[:32]
+
+def _tts_cache_get(text: str, voice_id: str) -> str | None:
+    key = _tts_cache_key(text, voice_id)
+    if key in _TTS_CACHE:
+        _TTS_CACHE.move_to_end(key)
+        return _TTS_CACHE[key]
+    return None
+
+def _tts_cache_put(text: str, voice_id: str, audio_b64: str) -> None:
+    key = _tts_cache_key(text, voice_id)
+    _TTS_CACHE[key] = audio_b64
+    _TTS_CACHE.move_to_end(key)
+    while len(_TTS_CACHE) > _TTS_CACHE_MAX:
+        _TTS_CACHE.popitem(last=False)
+
 
 def _get_eleven_client():
     global _eleven_client
@@ -61,10 +86,16 @@ def _get_eleven_client():
 
 
 async def _tts_elevenlabs(text: str) -> str | None:
-    """Synthesize via ElevenLabs Multilingual v2. Returns base64 mp3 or None."""
+    """Synthesize via ElevenLabs Multilingual v2. Returns base64 mp3 or None.
+    Cached by (voice_id, text) — repeated phrases are instant + free."""
     client = _get_eleven_client()
     if not client:
         return None
+
+    cached = _tts_cache_get(text, ELEVENLABS_VOICE_ID)
+    if cached is not None:
+        print(f"[TTS][elevenlabs] cache hit ({len(text)} chars)")
+        return cached
 
     def _gen():
         chunks = client.text_to_speech.convert(
@@ -77,9 +108,15 @@ async def _tts_elevenlabs(text: str) -> str | None:
 
     try:
         audio = await asyncio.to_thread(_gen)
-        return base64.b64encode(audio).decode("utf-8")
+        b64 = base64.b64encode(audio).decode("utf-8")
+        _tts_cache_put(text, ELEVENLABS_VOICE_ID, b64)
+        return b64
     except Exception as e:
-        print(f"[TTS][elevenlabs] error: {e} — falling back to edge_tts")
+        # Sanitize the key out of the error message
+        msg = str(e)
+        if ELEVENLABS_API_KEY:
+            msg = msg.replace(ELEVENLABS_API_KEY, "***")
+        print(f"[TTS][elevenlabs] error: {type(e).__name__}: {msg} — falling back to edge_tts")
         return None
 
 try:

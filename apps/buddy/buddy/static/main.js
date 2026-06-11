@@ -175,9 +175,15 @@ function connect() {
     };
 
     state.ws.onclose = () => {
+        const wasConnected = state.connected;
         state.connected = false;
         dom.statusPill.classList.remove('is-online');
         dom.status.textContent = STRINGS[state.uiLang].reconnecting;
+        // Only show a card if we dropped mid-conversation (had been connected).
+        if (wasConnected) {
+            const msg = state.uiLang === 'ar' ? 'انقطع الاتصال. تتم إعادة المحاولة…' : 'Reconnecting…';
+            addCard('system', msg);
+        }
         setTimeout(connect, 2000);
     };
 
@@ -232,6 +238,18 @@ function addCard(role, content, actions = []) {
     const card = document.createElement('div');
     card.className = 'card card--' + (role === 'user' ? 'user' : role === 'system' ? 'system' : 'buddy');
     card.textContent = content;
+
+    // Set lang/dir based on script detection so screen readers + fonts pick the right one.
+    if (typeof content === 'string' && content.length) {
+        const hasArabic = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/.test(content);
+        if (hasArabic) {
+            card.lang = 'ar';
+            card.dir = 'rtl';
+        } else if (/[A-Za-z]/.test(content)) {
+            card.lang = 'en';
+            card.dir = 'ltr';
+        }
+    }
 
     if (actions && actions.length && role !== 'system') {
         const wrap = document.createElement('div');
@@ -513,20 +531,45 @@ async function onRecordingStop() {
     try {
         const res = await fetch('/api/transcribe', { method: 'POST', body: form });
         const data = await res.json();
-        if (data && data.text && data.text.trim()) {
+        if (data && data.error) {
+            console.warn('STT error:', data.error);
+            const msg = state.uiLang === 'ar'
+                ? 'تعذر التعرف على الصوت. حاول مرة أخرى.'
+                : "Couldn't transcribe audio. Please try again.";
+            addCard('system', msg);
+            setState('idle');
+        } else if (data && data.text && data.text.trim()) {
             sendVoiceText(data.text.trim());
         } else {
             console.warn('STT empty:', data);
+            const msg = state.uiLang === 'ar'
+                ? 'لم أسمع شيئًا. اضغط وتحدث مجددًا.'
+                : "I didn't hear anything. Tap and try again.";
+            addCard('system', msg);
             setState('idle');
         }
     } catch (e) {
         console.error('STT request failed:', e);
+        const msg = state.uiLang === 'ar'
+            ? 'فشل الاتصال بالخادم. حاول مرة أخرى.'
+            : 'Server request failed. Please try again.';
+        addCard('system', msg);
         setState('idle');
     }
 }
 
 function toggleListening() {
-    if (state.isSpeaking) return;
+    // Tap-to-interrupt: if Buddy is speaking, stop playback and start listening.
+    if (state.isSpeaking || dom.body.dataset.state === 'speaking') {
+        try {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+        } catch (e) { /* ignore */ }
+        state.isSpeaking = false;
+        setState('idle');
+        startListening();
+        return;
+    }
     if (state.isListening) stopListening();
     else startListening();
 }

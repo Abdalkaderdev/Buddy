@@ -192,9 +192,9 @@ AVAILABLE ACTIONS
 
 # Audio settings — Whisper STT model.
 # tiny  (39M)  → ~1s on Pi 4, weak Arabic
-# base  (74M)  → ~2s on Pi 4, decent
-# small (244M) → ~4-6s on Pi 4, much better Arabic quality
-WHISPER_MODEL = "small"
+# base  (74M)  → ~2s on Pi 4, decent for both Arabic + English  ← chosen
+# small (244M) → ~4-6s on Pi 4, better Arabic but TOO slow for live chat
+WHISPER_MODEL = "base"
 
 # Available voices for language selection
 VOICES = {
