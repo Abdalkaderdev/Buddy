@@ -616,6 +616,9 @@ body[data-state="speaking"] .mic::after { animation: none; opacity: 0; }
     display: flex;
     flex-direction: column;
     animation: slideInSheet var(--dur-med) var(--ease-out);
+    /* iPhone notch + home indicator safety */
+    padding-top: env(safe-area-inset-top, 0);
+    padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 /* Desktop: side sheet on the right (or left in RTL) */
@@ -625,6 +628,7 @@ body[data-state="speaking"] .mic::after { animation: none; opacity: 0; }
         right: 0;
         bottom: 0;
         width: 380px;
+        max-width: 92vw;
         border-left: 1px solid var(--line);
     }
     html[dir="rtl"] .sheet {
@@ -644,9 +648,42 @@ body[data-state="speaking"] .mic::after { animation: none; opacity: 0; }
         bottom: 0;
         border-radius: var(--r-lg) var(--r-lg) 0 0;
         max-height: 86dvh;
+        max-height: 86vh; /* fallback for browsers without dvh */
         animation: slideInSheetBottom var(--dur-med) var(--ease-out);
     }
 }
+
+/* Make the close X button impossible to miss */
+.sheet-head .icon-btn#closeSheet {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--ink-900);
+    color: #fff;
+    flex-shrink: 0;
+}
+.sheet-head .icon-btn#closeSheet:hover,
+.sheet-head .icon-btn#closeSheet:active {
+    background: var(--teal-600, #155e5b);
+}
+
+/* Big redundant Done button at the bottom — always visible escape hatch */
+.sheet-done {
+    position: sticky;
+    bottom: 0;
+    margin-top: auto;
+    width: 100%;
+    padding: 16px;
+    background: var(--ink-900);
+    color: #fff;
+    border: 0;
+    border-radius: 12px;
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.sheet-done:active { opacity: 0.85; }
 
 @keyframes slideInSheet {
     from { transform: translateX(40px); opacity: 0; }

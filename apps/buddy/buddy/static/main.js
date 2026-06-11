@@ -359,10 +359,20 @@ function resetChat() {
 
 // ----- Server-side Whisper STT (replaces browser Web Speech) -----
 // Records mic audio via MediaRecorder, POSTs to /api/transcribe, gets text back.
-// Better quality than Web Speech for Arabic and works without Chrome-only APIs.
+// Includes voice-activity detection (VAD) so it auto-stops after silence,
+// the way Web Speech used to.
 let mediaRecorder = null;
 let audioChunks = [];
 let mediaStream = null;
+let vadCtx = null;        // AudioContext for silence detection
+let vadAnalyser = null;
+let vadSilenceMs = 0;     // accumulated silence duration
+let vadRafId = null;
+const VAD_SILENCE_THRESHOLD = 0.012;  // RMS — below = silence
+const VAD_HANG_MS = 1500;             // ms of silence before auto-stop
+const VAD_MIN_SPEECH_MS = 600;        // require at least this much speech first
+let vadSpeechMs = 0;
+let vadStartedAt = 0;
 
 async function initRecorder() {
     if (mediaStream) return true;
@@ -406,9 +416,75 @@ async function startListening() {
     mediaRecorder.start();
     state.isListening = true;
     setState('listening');
+    startVad();
 }
 
+// Voice-activity detection — auto-stop after ~1.5s of silence (once they've spoken).
+function startVad() {
+    try {
+        if (!vadCtx) {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            vadCtx = new AC();
+        }
+        const src = vadCtx.createMediaStreamSource(mediaStream);
+        vadAnalyser = vadCtx.createAnalyser();
+        vadAnalyser.fftSize = 1024;
+        src.connect(vadAnalyser);
+        vadSilenceMs = 0;
+        vadSpeechMs = 0;
+        vadStartedAt = performance.now();
+        const buf = new Float32Array(vadAnalyser.fftSize);
+        let lastTick = performance.now();
+
+        const tick = () => {
+            if (!state.isListening) return;
+            vadAnalyser.getFloatTimeDomainData(buf);
+            // RMS volume
+            let sum = 0;
+            for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+            const rms = Math.sqrt(sum / buf.length);
+
+            const now = performance.now();
+            const dt = now - lastTick;
+            lastTick = now;
+
+            if (rms > VAD_SILENCE_THRESHOLD) {
+                vadSpeechMs += dt;
+                vadSilenceMs = 0;
+            } else {
+                vadSilenceMs += dt;
+            }
+
+            // Auto-stop only after they've actually talked
+            if (vadSpeechMs > VAD_MIN_SPEECH_MS && vadSilenceMs > VAD_HANG_MS) {
+                stopListening();
+                return;
+            }
+            // Hard cap: 30s safety
+            if (now - vadStartedAt > 30000) {
+                stopListening();
+                return;
+            }
+            vadRafId = requestAnimationFrame(tick);
+        };
+        vadRafId = requestAnimationFrame(tick);
+    } catch (e) {
+        console.warn('VAD unavailable:', e);
+    }
+}
+
+function stopVad() {
+    if (vadRafId) {
+        cancelAnimationFrame(vadRafId);
+        vadRafId = null;
+    }
+    if (vadAnalyser) {
+        try { vadAnalyser.disconnect(); } catch {}
+        vadAnalyser = null;
+    }
+
 function stopListening() {
+    stopVad();
     if (mediaRecorder && mediaRecorder.state === 'recording') {
         try { mediaRecorder.stop(); } catch {}
     }
@@ -469,6 +545,12 @@ function wire() {
     dom.settingsBtn.addEventListener('click', openSheet);
     dom.closeSheet.addEventListener('click', closeSheet);
     dom.sheetBackdrop.addEventListener('click', closeSheet);
+    // Big bottom "Done" button as a redundant escape hatch
+    const doneBtn = document.getElementById('doneBtn');
+    if (doneBtn) {
+        doneBtn.addEventListener('click', closeSheet);
+        doneBtn.textContent = state.uiLang === 'ar' ? 'تم' : 'Done';
+    }
 
     dom.resetBtn.addEventListener('click', resetChat);
 
