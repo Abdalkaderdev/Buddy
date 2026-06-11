@@ -482,6 +482,7 @@ function stopVad() {
         try { vadAnalyser.disconnect(); } catch {}
         vadAnalyser = null;
     }
+}
 
 function stopListening() {
     stopVad();
