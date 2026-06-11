@@ -50,9 +50,16 @@ class BuddyAI:
         """Update context about current situation."""
         self.known_person = person_name
 
-    def chat(self, user_message: str, context: dict | None = None, lang: str = "en") -> tuple[str, list[str]]:
+    def chat(self, user_message: str, context: dict | None = None, lang: str = "en", image_b64: str | None = None) -> tuple[str, list[str]]:
         """
         Send a message and get a response.
+
+        Args:
+            user_message: transcribed user text.
+            context: optional context dict (face detection etc).
+            lang: "en" or "ar".
+            image_b64: optional base64-encoded JPEG of a camera frame; when set
+                the Claude provider sends a multimodal user turn (image + text).
 
         Returns:
             Tuple of (response_text, list_of_actions)
@@ -82,7 +89,14 @@ class BuddyAI:
 
         # Build pending history WITHOUT committing yet — if the LLM call fails,
         # we don't want a dangling user turn that breaks subsequent calls.
-        pending = self.conversation_history + [{"role": "user", "content": full_message}]
+        if image_b64 and self.provider == "claude":
+            user_content = [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
+                {"type": "text", "text": full_message},
+            ]
+        else:
+            user_content = full_message
+        pending = self.conversation_history + [{"role": "user", "content": user_content}]
         if len(pending) > 20:
             pending = pending[-20:]
         saved_history = self.conversation_history
@@ -104,7 +118,10 @@ class BuddyAI:
                 msg = f"Sorry — couldn't reach the {self.provider} backend ({err_type}). Try again. [ACTION:droop_antennas]"
             return self._clean_response(msg), self._parse_actions(msg)
 
-        # Only commit on success.
+        # Only commit on success. Store the user turn as text-only so old
+        # camera frames aren't re-sent (and re-billed) on every later call.
+        if isinstance(user_content, list):
+            self.conversation_history[-1] = {"role": "user", "content": full_message}
         self.conversation_history.append({"role": "assistant", "content": response_text})
         if len(self.conversation_history) > 20:
             self.conversation_history = self.conversation_history[-20:]
@@ -126,13 +143,15 @@ class BuddyAI:
         return response["message"]["content"]
 
     def _chat_claude(self) -> str:
-        """Chat using Claude API. Capped at 180 tokens — Buddy is supposed to be
-        snappy. Anything longer = slow reply + heavy TTS bill."""
+        """Chat using Claude API. max_tokens=300 is headroom, not a target —
+        brevity (~350 chars) is enforced by the system prompt. 140 was too low:
+        it cut replies mid-sentence, ate trailing [ACTION] tags, and truncated
+        the safety-check question in crisis replies."""
         import time as _t
         t0 = _t.time()
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=180,
+            max_tokens=300,
             system=SYSTEM_PROMPT,
             messages=self.conversation_history,
         )
@@ -162,15 +181,31 @@ class BuddyAI:
     )
     # Crisis trigger phrases — if user message contains ANY of these AND Claude's reply
     # didn't include the hand-off token, we force-append it. Belt and suspenders.
+    # Arabic patterns are written in NORMALIZED form (hamza variants collapsed to ا,
+    # ى→ي, ؤ→و, ئ→ي, no diacritics) — the user message is normalized the same way
+    # before matching, so "ما عاد أتحمل" and "ما عاد اتحمل" both match.
     _CRISIS_PATTERNS = [
         r"\bkill myself\b", r"\bend it\b", r"\bsuicid", r"\bhurt myself\b",
         r"\bcut myself\b", r"\bwant to die\b", r"\bdon'?t want to (live|be here)",
-        r"\bno reason to live\b", r"\bgive up\b",
-        r"اقتل نفسي", r"انتحار", r"اريد اموت", r"أريد أن أموت", r"ما عاد اتحمل",
-        r"ما عدت أتحمل", r"تعبت من الحياة", r"ما عندي رغبة", r"اذي نفسي",
-        r"أذي نفسي", r"أؤذي نفسي", r"ما لي خاطر اعيش",
+        r"\bno reason to live\b", r"\bgive up\b", r"\bend my life\b",
+        r"\bending it\b", r"\bnot want(ing)? to be here\b",
+        r"اقتل نفسي", r"انتحار", r"اريد اموت", r"اريد ان اموت", r"ما عاد اتحمل",
+        r"ما عدت اتحمل", r"تعبت من الحياة", r"ما عندي رغبة", r"اذي نفسي",
+        r"اوذي نفسي", r"ما لي خاطر اعيش", r"انهي حياتي", r"اختفي من هاي الدنيا",
     ]
     _CRISIS_RE = re.compile("|".join(_CRISIS_PATTERNS), re.IGNORECASE)
+
+    _AR_DIACRITICS_RE = re.compile(r"[ً-ْـ]")  # harakat + tatweel
+
+    @staticmethod
+    def _normalize_ar(text: str) -> str:
+        """Collapse Arabic orthography variants so crisis matching can't be
+        evaded by hamza/diacritic spelling differences."""
+        text = BuddyAI._AR_DIACRITICS_RE.sub("", text)
+        for src, dst in (("أ", "ا"), ("إ", "ا"), ("آ", "ا"),
+                         ("ى", "ي"), ("ؤ", "و"), ("ئ", "ي")):
+            text = text.replace(src, dst)
+        return text
 
     def _clean_response(self, text: str, user_message: str = "") -> str:
         """Strip meta-tags and inject real resources before TTS / display.
@@ -182,14 +217,19 @@ class BuddyAI:
         # Strip leaked instruction tags Claude sometimes echoes from the prompt
         text = re.sub(r"\[Instructions?:[^\]]*\]\s*", "", text, flags=re.IGNORECASE)
 
-        is_arabic = bool(re.search(r"[؀-ۿ]", text))
+        # Pick hand-off language by counting LETTERS, not any Arabic codepoint —
+        # Claude uses the Arabic comma (،) even in English replies, which used to
+        # flip English crisis replies to the Arabic hand-off.
+        ar_letters = len(re.findall(r"[ء-يٱ-ۓ]", text))
+        lat_letters = len(re.findall(r"[A-Za-z]", text))
+        is_arabic = ar_letters >= lat_letters
         handoff = self._HANDOFF_AR if is_arabic else self._HANDOFF_EN
 
         had_token = bool(self._RESOURCES_TOKEN_RE.search(text))
         text = self._RESOURCES_TOKEN_RE.sub(handoff, text)
 
         # Force-append hand-off if user was in crisis and Claude forgot the token
-        if user_message and self._CRISIS_RE.search(user_message) and not had_token:
+        if user_message and self._CRISIS_RE.search(self._normalize_ar(user_message)) and not had_token:
             print(f"[SAFETY] crisis phrase detected in user msg — force-appending hand-off")
             text = text.rstrip() + "\n\n" + handoff
         pattern = r'\[ACTION:\w+\]'

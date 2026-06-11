@@ -247,3 +247,134 @@ def get_detector() -> FaceDetector:
     if _detector is None:
         _detector = FaceDetector()
     return _detector
+# Picamera2-based capture helper for CSI cameras.
+# Appended to vision.py.
+
+import threading as _threading
+
+class PiCameraCapture:
+    """Wraps picamera2 to provide a cv2.VideoCapture-like read() returning BGR frames."""
+
+    def __init__(self, size=(640, 480)):
+        import numpy as _np  # noqa
+        from picamera2 import Picamera2
+        self._np = _np
+        self._picam = Picamera2()
+        cfg = self._picam.create_video_configuration(
+            main={"size": size, "format": "RGB888"}
+        )
+        self._picam.configure(cfg)
+        self._picam.start()
+        self._lock = _threading.Lock()
+        self._opened = True
+
+    def isOpened(self) -> bool:
+        return self._opened
+
+    def read(self):
+        import cv2 as _cv2
+        if not self._opened:
+            return False, None
+        try:
+            with self._lock:
+                rgb = self._picam.capture_array("main")
+            # picamera2 'RGB888' main stream is actually BGR-ordered in numpy
+            # when consumed via capture_array; convert defensively to BGR for OpenCV.
+            # Empirically RGB888 -> array is RGB, so swap to BGR:
+            bgr = _cv2.cvtColor(rgb, _cv2.COLOR_RGB2BGR)
+            bgr = _cv2.rotate(bgr, _cv2.ROTATE_90_COUNTERCLOCKWISE)
+            return True, bgr
+        except Exception:
+            return False, None
+
+    def release(self):
+        if self._opened:
+            try:
+                self._picam.stop()
+                self._picam.close()
+            except Exception:
+                pass
+            self._opened = False
+
+
+def open_camera(index: int = 0, size=(640, 480)):
+    """Open a camera, preferring picamera2 (CSI) and falling back to cv2.VideoCapture.
+
+    Returns an object with isOpened() and read() methods, or None if no camera works.
+    """
+    # Try picamera2 first
+    try:
+        cam = PiCameraCapture(size=size)
+        if cam.isOpened():
+            # Sanity-check one frame.
+            ok, _ = cam.read()
+            if ok:
+                print("[CAMERA] using picamera2 (CSI)")
+                return cam
+            cam.release()
+    except Exception as e:
+        print(f"[CAMERA] picamera2 unavailable ({e}); trying V4L2")
+
+    # Fallback: V4L2 / USB webcam
+    try:
+        import cv2 as _cv2
+        cap = _cv2.VideoCapture(index)
+        if cap.isOpened():
+            print(f"[CAMERA] using V4L2 device index {index}")
+            return cap
+        cap.release()
+    except Exception as e:
+        print(f"[CAMERA] V4L2 unavailable: {e}")
+
+    return None
+
+
+# ----- Singleton frame capture for multimodal Claude -----
+_shared_camera = None
+_shared_lock = None
+
+
+def get_shared_camera():
+    """Return a process-wide singleton PiCameraCapture, lazily opened.
+
+    Only one process can hold libcamera at a time, so callers within the same
+    process should reuse this. Returns None if camera can't be opened.
+    """
+    global _shared_camera, _shared_lock
+    if _shared_camera is not None:
+        return _shared_camera
+    import threading
+    if _shared_lock is None:
+        _shared_lock = threading.Lock()
+    with _shared_lock:
+        if _shared_camera is not None:
+            return _shared_camera
+        cam = open_camera()
+        if cam is None:
+            return None
+        _shared_camera = cam
+        return _shared_camera
+
+
+def capture_frame_b64(jpeg_quality: int = 75) -> str | None:
+    """Grab one frame from the shared camera, JPEG-encode, base64 it.
+
+    Frame is already 90deg counter-clockwise rotated by PiCameraCapture.read.
+    Returns None on any failure (no camera, bad frame, encode error).
+    """
+    cam = get_shared_camera()
+    if cam is None:
+        return None
+    try:
+        import cv2 as _cv2
+        import base64 as _b64
+        ok, frame = cam.read()
+        if not ok or frame is None:
+            return None
+        ok2, buf = _cv2.imencode(".jpg", frame, [int(_cv2.IMWRITE_JPEG_QUALITY), jpeg_quality])
+        if not ok2:
+            return None
+        return _b64.b64encode(buf.tobytes()).decode("ascii")
+    except Exception as e:
+        print(f"[VISION] capture_frame_b64 error: {type(e).__name__}: {e}")
+        return None

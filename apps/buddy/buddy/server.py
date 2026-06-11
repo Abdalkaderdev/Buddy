@@ -132,7 +132,7 @@ except ImportError:
 from .ai import get_ai
 from .config import LLM_PROVIDER, OLLAMA_MODEL, TTS_VOICE, VOICES
 
-app = FastAPI(title="Buddy - Companion Robot")
+app = FastAPI(title="Sara - Companion Robot")
 
 # Get the static files directory
 STATIC_DIR = Path(__file__).parent / "static"
@@ -195,17 +195,17 @@ def _camera_worker():
     """Background thread: grab frames from USB webcam and run face detection."""
     try:
         import cv2
-        from .vision import get_detector
+        from .vision import get_detector, open_camera
     except Exception as e:
         print(f"[CAMERA] disabled — opencv/vision unavailable: {e}")
         return
 
     detector = get_detector()
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    if not cap.isOpened():
-        print(f"[CAMERA] could not open device index {CAMERA_INDEX} — disabling")
+    cap = open_camera(CAMERA_INDEX)
+    if cap is None or not cap.isOpened():
+        print(f"[CAMERA] could not open any camera (CSI/picamera2 or V4L2 index {CAMERA_INDEX}) — disabling")
         return
-    print(f"[CAMERA] worker started on index {CAMERA_INDEX}")
+    print(f"[CAMERA] worker started")
 
     while True:
         ok, frame = cap.read()
@@ -242,7 +242,30 @@ def _camera_context() -> dict:
     return {"detected_face": face}
 
 
+
+# --- TTS sanitization ---
+_EMOJI_RE = re.compile(
+    "[\U0001F000-\U0001FFFF\U00002600-\U000027BF\U0001F1E0-\U0001F1FF]+",
+    flags=re.UNICODE,
+)
+def _sanitize_for_tts(text: str) -> str:
+    if not text:
+        return text
+    text = _EMOJI_RE.sub("", text)
+    text = re.sub(r"\[ACTION:[^\]]*\]", "", text)
+    text = re.sub(r"\[see RESOURCES\]", "", text)
+    # Markdown sounds wrong spoken: strip bold/italics markers, heading hashes,
+    # and bullet markers at line starts (keep the text itself).
+    text = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", text)
+    text = re.sub(r"_{2,}([^_\n]+)_{2,}", r"\1", text)
+    text = re.sub(r"^\s{0,3}#{1,6}\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s{0,3}[-*•]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\s+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
 async def text_to_speech(text: str, voice: str = TTS_VOICE) -> str | None:
+    text = _sanitize_for_tts(text)
     """Convert text to speech and return base64-encoded MP3.
 
     Prefers ElevenLabs (Multilingual v2) when ELEVENLABS_API_KEY is set,
@@ -290,7 +313,7 @@ user_settings: dict[WebSocket, dict] = {}
 async def startup():
     """Initialize AI and robot on startup."""
     global ai, robot, motion
-    print("Initializing Buddy AI...")
+    print("Initializing Sara AI...")
     ai = get_ai(provider=LLM_PROVIDER, model=OLLAMA_MODEL)
 
     # Connect to robot
@@ -325,7 +348,7 @@ async def startup():
     except (asyncio.TimeoutError, Exception) as e:
         print(f"[TTS] pre-warm timed out or errored: {e} — continuing")
 
-    print("Buddy is ready!")
+    print("Sara is ready!")
 
 
 def _prewarm_whisper():
@@ -343,14 +366,14 @@ def _prewarm_whisper():
 # These get TTS-generated at boot and cached, so the very first reply of a
 # demo is instant (no ElevenLabs round-trip needed).
 PREWARM_PHRASES = [
-    "هلا! أنا بَدي، شلونك اليوم؟",
+    "هلا! أنا سارة، شلونك اليوم؟",
     "هلا بيك",
     "اي والله",
     "زين، تره خوش سؤال",
     "هاي والله شكلها سهلة بس قوية",
     "خوش، خل نبدأ",
     "اوكي خل نشتغلها سوا",
-    "Hey! I'm Buddy, how are you today?",
+    "Hi! I'm Sara, how are you today?",
     "Sure, let's do it.",
     "Good question.",
 ]
@@ -477,7 +500,7 @@ async def test_voice(voice_key: str):
     voice_code = VOICES[voice_key]["code"]
     print(f"[TEST] Testing voice: {voice_key} -> {voice_code}")
 
-    text = "مرحبا، أنا بادي" if "ar" in voice_key else "Hello, I am Buddy"
+    text = "مرحبا، أنا سارة" if "ar" in voice_key else "Hello, I am Sara"
     audio = await text_to_speech(text, voice_code)
 
     if audio:
@@ -513,7 +536,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # Welcome message in Arabic — wrapped so a TTS failure here doesn't
     # kill the whole connection before chat can start.
     try:
-        welcome_text = "هلا! أنا بَدي، صديقك الروبوت. شلونك اليوم؟"
+        welcome_text = "هلا! أنا سارة، صديقك الروبوت. شلونك اليوم؟"
         welcome_audio = await text_to_speech(welcome_text, user_settings[websocket]["voice_code"])
         await websocket.send_json({
             "type": "message",
@@ -622,9 +645,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Confirm voice change
                     voice_name = VOICES[voice_key]["name"]
                     if VOICES[voice_key]["lang"] == "ar":
-                        confirm_text = "مرحبا! أنا بادي، صديقك الروبوت. شلونك اليوم؟"
+                        confirm_text = "مرحبا! أنا سارة، صديقك الروبوت. شلونك اليوم؟"
                     else:
-                        confirm_text = f"Voice changed to {voice_name}. Hello, I'm Buddy!"
+                        confirm_text = f"Voice changed to {voice_name}. Hello, I'm Sara!"
 
                     audio_data = await text_to_speech(confirm_text, VOICES[voice_key]["code"])
                     await websocket.send_json({
@@ -657,7 +680,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 def main():
     """Run the web server. Uses HTTPS if BUDDY_SSL_CERT / BUDDY_SSL_KEY are set."""
     print("\n" + "=" * 50)
-    print("  BUDDY - Web Interface")
+    print("  SARA - Web Interface")
     print("=" * 50)
 
     cert = os.getenv("BUDDY_SSL_CERT")

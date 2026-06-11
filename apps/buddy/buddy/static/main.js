@@ -43,14 +43,14 @@ const VOICE_CATALOG = [
 // ----- i18n -----
 const STRINGS = {
     ar: {
-        brand: 'بَدي',
+        brand: 'سارة',
         connecting: 'يتصل…',
         online: 'متصل',
         offline: 'غير متصل',
         reconnecting: 'يحاول الاتصال…',
-        tapToTalk: 'اضغط للحديث مع بَدي',
+        tapToTalk: 'اضغط للحديث مع سارة',
         listening: 'يسمعك… اضغط لتوقف',
-        speaking: 'يتحدث بَدي',
+        speaking: 'تتحدث سارة',
         thinking: 'يفكّر…',
         micUnsupported: 'يحتاج مايك Chrome أو Edge',
         settings: 'الإعدادات',
@@ -62,19 +62,19 @@ const STRINGS = {
         suggest1: 'احكِ لي نكتة',
         suggest2: 'كيف حالك اليوم؟',
         suggest3: 'لِف لفّة فرح',
-        disclaimerText: 'بَدي مو طبيب نفسي. إذا كنت بأزمة، احكِ مع إنسان حقيقي.',
+        disclaimerText: 'سارة مو طبيبة نفسي. إذا كنت بأزمة، احكِ مع إنسان حقيقي.',
         disclaimerLink: 'اقرأ المصادر الموثوقة',
         disclaimerDismiss: 'فهمت',
     },
     en: {
-        brand: 'Buddy',
+        brand: 'Sara',
         connecting: 'Connecting…',
         online: 'Online',
         offline: 'Offline',
         reconnecting: 'Reconnecting…',
-        tapToTalk: 'Tap to talk to Buddy',
+        tapToTalk: 'Tap to talk to Sara',
         listening: 'Listening… tap to stop',
-        speaking: 'Buddy is speaking',
+        speaking: 'Sara is speaking',
         thinking: 'Thinking…',
         micUnsupported: 'Voice needs Chrome or Edge',
         settings: 'Settings',
@@ -86,7 +86,7 @@ const STRINGS = {
         suggest1: 'Tell me a joke',
         suggest2: 'How are you?',
         suggest3: 'Do a happy spin',
-        disclaimerText: "Buddy is not a therapist. If you're in crisis, please reach a real human.",
+        disclaimerText: "Sara is not a therapist. If you're in crisis, please reach a real human.",
         disclaimerLink: 'See verified resources',
         disclaimerDismiss: 'Got it',
     },
@@ -249,7 +249,7 @@ function playAudio(b64) {
         audioPlayer.onended = () => {
             state.isSpeaking = false;
             setState('idle');
-            if (state.autoListenAfterReply && recognition && !state.isListening) {
+            if (state.autoListenAfterReply && !state.isListening && !state.isSpeaking) {
                 setTimeout(() => startListening(), 380);
             }
         };
@@ -596,7 +596,7 @@ async function onRecordingStop() {
 }
 
 function toggleListening() {
-    // Tap-to-interrupt: if Buddy is speaking, stop playback and start listening.
+    // Tap-to-interrupt: if Sara is speaking, stop playback and start listening.
     if (state.isSpeaking || dom.body.dataset.state === 'speaking') {
         try {
             audioPlayer.pause();
