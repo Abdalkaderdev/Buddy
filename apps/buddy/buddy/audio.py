@@ -42,9 +42,13 @@ class SpeechToText:
         else:
             self.model = None
 
-    def transcribe(self, audio_path: str) -> str:
-        """Transcribe audio file to text. Auto-detects language (Arabic / English / etc).
-        Uses VAD to skip silence, beam_size=5 for better accuracy."""
+    def transcribe(self, audio_path: str, language: str | None = None) -> str:
+        """Transcribe audio file to text.
+
+        `language` can be 'ar', 'en', etc — passing it eliminates the
+        auto-detection bug where short clips like 'marhaba' get classified
+        as Thai/Indonesian/etc. None = auto-detect.
+        """
         if not self.model:
             return ""
 
@@ -53,6 +57,8 @@ class SpeechToText:
             beam_size=5,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 400},
+            language=language,  # None = auto
+            initial_prompt="مرحبا" if language == "ar" else None,  # hint for Arabic
         )
         text = " ".join(seg.text for seg in segments).strip()
         print(f"[STT] lang={info.language} (p={info.language_probability:.2f}) text={text!r}")

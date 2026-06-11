@@ -398,9 +398,15 @@ async def transcribe(audio: UploadFile = File(...), lang: str = "en"):
                 f.write(chunk)
         try:
             t0 = time.time()
-            text = stt.transcribe(path)
-            print(f"[TIMING] STT took {time.time()-t0:.2f}s  -> {text[:60]!r}")
-            return {"text": text}
+            # Map UI lang code to Whisper language code (None = auto-detect)
+            whisper_lang = None
+            if lang and lang.startswith("ar"):
+                whisper_lang = "ar"
+            elif lang and lang.startswith("en"):
+                whisper_lang = "en"
+            text = stt.transcribe(path, language=whisper_lang)
+            print(f"[TIMING] STT took {time.time()-t0:.2f}s  hint={whisper_lang}  -> {text[:60]!r}")
+            return {"text": text, "language": whisper_lang}
         except Exception as e:
             import traceback
             print(f"[TRANSCRIBE] {type(e).__name__}: {e}\n{traceback.format_exc()}")

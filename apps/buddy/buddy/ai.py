@@ -141,7 +141,10 @@ class BuddyAI:
         return re.findall(pattern, text)
 
     def _clean_response(self, text: str) -> str:
-        """Remove action tags from response for TTS."""
+        """Remove action tags and any leaked [Instructions:...] meta-context from
+        the response so it never reaches the user or TTS."""
+        # Strip leaked instruction tags Claude sometimes echoes from the prompt
+        text = re.sub(r"\[Instructions?:[^\]]*\]\s*", "", text, flags=re.IGNORECASE)
         pattern = r'\[ACTION:\w+\]'
         return re.sub(pattern, '', text).strip()
 

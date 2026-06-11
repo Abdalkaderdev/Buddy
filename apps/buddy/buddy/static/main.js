@@ -528,8 +528,12 @@ async function onRecordingStop() {
 
     const form = new FormData();
     form.append('audio', blob, 'audio.webm');
+    // Send language hint so Whisper doesn't misdetect a short "marhaba" as Thai.
+    const langHint = (state.currentLang || 'ar-IQ').slice(0, 2);
     try {
-        const res = await fetch('/api/transcribe', { method: 'POST', body: form });
+        const res = await fetch('/api/transcribe?lang=' + encodeURIComponent(langHint), {
+            method: 'POST', body: form,
+        });
         const data = await res.json();
         if (data && data.error) {
             console.warn('STT error:', data.error);
