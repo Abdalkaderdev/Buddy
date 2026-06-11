@@ -43,13 +43,20 @@ class SpeechToText:
             self.model = None
 
     def transcribe(self, audio_path: str) -> str:
-        """Transcribe audio file to text."""
+        """Transcribe audio file to text. Auto-detects language (Arabic / English / etc).
+        Uses VAD to skip silence, beam_size=5 for better accuracy."""
         if not self.model:
             return ""
 
-        segments, _ = self.model.transcribe(audio_path)
-        text = " ".join(segment.text for segment in segments)
-        return text.strip()
+        segments, info = self.model.transcribe(
+            audio_path,
+            beam_size=5,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 400},
+        )
+        text = " ".join(seg.text for seg in segments).strip()
+        print(f"[STT] lang={info.language} (p={info.language_probability:.2f}) text={text!r}")
+        return text
 
     def transcribe_array(self, audio: "np.ndarray", sample_rate: int = 16000) -> str:
         """Transcribe numpy audio array to text."""

@@ -135,8 +135,11 @@ AVAILABLE ACTIONS
 - [ACTION:perk_antennas] / [ACTION:droop_antennas] — subtle, sparingly
 """
 
-# Audio settings
-WHISPER_MODEL = "base"  # tiny, base, small, medium, large
+# Audio settings — Whisper STT model.
+# tiny  (39M)  → ~1s on Pi 4, weak Arabic
+# base  (74M)  → ~2s on Pi 4, decent
+# small (244M) → ~4-6s on Pi 4, much better Arabic quality
+WHISPER_MODEL = "small"
 
 # Available voices for language selection
 VOICES = {

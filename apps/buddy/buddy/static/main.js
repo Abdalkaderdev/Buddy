@@ -357,62 +357,94 @@ function resetChat() {
     closeSheet();
 }
 
-// ----- Web Speech API -----
-function initSpeechRecognition() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
+// ----- Server-side Whisper STT (replaces browser Web Speech) -----
+// Records mic audio via MediaRecorder, POSTs to /api/transcribe, gets text back.
+// Better quality than Web Speech for Arabic and works without Chrome-only APIs.
+let mediaRecorder = null;
+let audioChunks = [];
+let mediaStream = null;
+
+async function initRecorder() {
+    if (mediaStream) return true;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         dom.micHint.textContent = STRINGS[state.uiLang].micUnsupported;
         dom.micBtn.disabled = true;
-        return;
+        return false;
     }
-    recognition = new SR();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = state.currentLang;
-
-    recognition.onstart = () => {
-        state.isListening = true;
-        setState('listening');
-        dom.transcript.textContent = '';
-    };
-
-    recognition.onresult = (event) => {
-        let final = '';
-        let interim = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-            const t = event.results[i][0].transcript;
-            if (event.results[i].isFinal) final += t;
-            else interim += t;
-        }
-        dom.transcript.textContent = interim || final;
-        if (final.trim()) sendVoiceText(final.trim());
-    };
-
-    recognition.onerror = (event) => {
-        console.warn('Recognition error:', event.error);
-        stopListening();
-    };
-
-    recognition.onend = () => {
-        if (state.isListening) stopListening();
-    };
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+        return true;
+    } catch (e) {
+        console.error('Mic permission denied:', e);
+        dom.micHint.textContent = STRINGS[state.uiLang].micUnsupported;
+        dom.micBtn.disabled = true;
+        return false;
+    }
 }
 
-function startListening() {
-    if (!recognition || state.isListening || state.isSpeaking) return;
+async function startListening() {
+    if (state.isListening || state.isSpeaking) return;
+    const ok = await initRecorder();
+    if (!ok) return;
+
+    audioChunks = [];
+    // Prefer opus webm — small + Whisper handles it via ffmpeg.
+    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
     try {
-        recognition.lang = state.currentLang;
-        recognition.start();
-    } catch (e) {
-        console.warn('Recognition start failed:', e);
+        mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mime });
+    } catch {
+        mediaRecorder = new MediaRecorder(mediaStream);
     }
+    mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunks.push(e.data);
+    };
+    mediaRecorder.onstop = onRecordingStop;
+    mediaRecorder.start();
+    state.isListening = true;
+    setState('listening');
 }
 
 function stopListening() {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        try { mediaRecorder.stop(); } catch {}
+    }
     state.isListening = false;
-    if (dom.body.dataset.state === 'listening') setState('idle');
-    if (recognition) {
-        try { recognition.stop(); } catch (e) {}
+}
+
+async function onRecordingStop() {
+    if (audioChunks.length === 0) {
+        setState('idle');
+        return;
+    }
+    const blob = new Blob(audioChunks, { type: mediaRecorder?.mimeType || 'audio/webm' });
+
+    // Tiny clip (<0.3 sec) = probably a tap, ignore
+    if (blob.size < 4000) {
+        setState('idle');
+        return;
+    }
+
+    setState('thinking');
+    dom.transcript.textContent = STRINGS[state.uiLang].thinking;
+
+    const form = new FormData();
+    form.append('audio', blob, 'audio.webm');
+    try {
+        const res = await fetch('/api/transcribe', { method: 'POST', body: form });
+        const data = await res.json();
+        if (data && data.text && data.text.trim()) {
+            sendVoiceText(data.text.trim());
+        } else {
+            console.warn('STT empty:', data);
+            setState('idle');
+        }
+    } catch (e) {
+        console.error('STT request failed:', e);
+        setState('idle');
     }
 }
 
@@ -465,5 +497,6 @@ document.addEventListener('DOMContentLoaded', () => {
     renderVoiceGrid();
     wire();
     connect();
-    initSpeechRecognition();
+    // initRecorder is lazy — runs on the first mic click so the permission
+    // prompt happens in response to a user gesture (browser requirement).
 });
