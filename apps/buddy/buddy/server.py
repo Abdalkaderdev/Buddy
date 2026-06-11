@@ -269,32 +269,58 @@ async def get_voices():
     return VOICES
 
 
+MAX_AUDIO_UPLOAD = 5 * 1024 * 1024  # 5 MB ≈ ~60s of opus/webm. Cap blocks DoS.
+
+
 @app.post("/api/transcribe")
 async def transcribe(audio: UploadFile = File(...), lang: str = "en"):
-    """Whisper STT endpoint — alternative to browser Web Speech.
+    """Whisper STT endpoint — Pi-friendly replacement for browser Web Speech.
 
-    Frontend POSTs a WAV/WebM blob recorded via MediaRecorder; we save it,
-    run faster-whisper on it, return JSON {text: "..."}.
-
-    Used on the Pi where browser Web Speech isn't reliable.
+    Streams the upload to a temp file with a hard size cap, runs faster-whisper,
+    returns {"text": "..."} or {"error": "..."} on failure (never an opaque 500).
     """
     from .audio import get_stt
+
+    ctype = (audio.content_type or "").lower()
+    if not (ctype.startswith("audio/") or ctype.startswith("video/webm") or ctype.startswith("application/octet-stream")):
+        return {"error": f"audio required, got content-type={ctype!r}"}
+
     stt = get_stt()
     if stt.model is None:
         return {"error": "Whisper not available (install faster-whisper)"}
 
-    suffix = ".webm" if (audio.content_type or "").endswith("webm") else ".wav"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-        f.write(await audio.read())
-        path = f.name
+    suffix = ".webm" if "webm" in ctype else ".wav"
+    path = None
     try:
-        text = stt.transcribe(path)
-        return {"text": text}
-    finally:
+        # Stream upload to disk with size cap so a 10 GB POST can't OOM the Pi
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            path = f.name
+            total = 0
+            while True:
+                chunk = await audio.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_AUDIO_UPLOAD:
+                    f.close()
+                    Path(path).unlink(missing_ok=True)
+                    return {"error": f"audio too large (cap {MAX_AUDIO_UPLOAD // 1024} KB)"}
+                f.write(chunk)
         try:
-            Path(path).unlink()
-        except Exception:
-            pass
+            text = stt.transcribe(path)
+            return {"text": text}
+        except Exception as e:
+            import traceback
+            print(f"[TRANSCRIBE] {type(e).__name__}: {e}\n{traceback.format_exc()}")
+            return {"error": f"transcription failed: {type(e).__name__}: {e}"}
+    finally:
+        if path:
+            try:
+                Path(path).unlink()
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                print(f"[TRANSCRIBE] temp cleanup failed: {path}: {e}")
 
 
 @app.get("/api/camera-state")

@@ -80,34 +80,37 @@ class BuddyAI:
         if context_parts:
             full_message = f"[Instructions: {' '.join(context_parts)}]\n\nUser: {user_message}"
 
-        # Add to history
-        self.conversation_history.append({
-            "role": "user",
-            "content": full_message
-        })
+        # Build pending history WITHOUT committing yet — if the LLM call fails,
+        # we don't want a dangling user turn that breaks subsequent calls.
+        pending = self.conversation_history + [{"role": "user", "content": full_message}]
+        if len(pending) > 20:
+            pending = pending[-20:]
+        saved_history = self.conversation_history
+        self.conversation_history = pending
 
-        # Keep history manageable (last 20 messages)
+        try:
+            if self.provider == "ollama":
+                response_text = self._chat_ollama()
+            else:
+                response_text = self._chat_claude()
+        except Exception as e:
+            # Roll back history so the conversation isn't corrupted.
+            self.conversation_history = saved_history
+            err_type = type(e).__name__
+            print(f"[AI] {self.provider} chat failed: {err_type}: {e}")
+            if self.language == "ar":
+                msg = f"عذراً، صار خطأ بالاتصال ({err_type}). جرب مرة لو سمحت. [ACTION:droop_antennas]"
+            else:
+                msg = f"Sorry — couldn't reach the {self.provider} backend ({err_type}). Try again. [ACTION:droop_antennas]"
+            return self._clean_response(msg), self._parse_actions(msg)
+
+        # Only commit on success.
+        self.conversation_history.append({"role": "assistant", "content": response_text})
         if len(self.conversation_history) > 20:
             self.conversation_history = self.conversation_history[-20:]
 
-        # Get response based on provider
-        if self.provider == "ollama":
-            response_text = self._chat_ollama()
-        else:
-            response_text = self._chat_claude()
-
-        # Add to history
-        self.conversation_history.append({
-            "role": "assistant",
-            "content": response_text
-        })
-
-        # Parse actions from response
         actions = self._parse_actions(response_text)
-
-        # Clean response (remove action tags for speech)
         clean_text = self._clean_response(response_text)
-
         return clean_text, actions
 
     def _chat_ollama(self) -> str:
