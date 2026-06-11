@@ -20,7 +20,7 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
-REPO_URL="${BUDDY_REPO_URL:-https://github.com/pollen-robotics/reachy_mini.git}"
+REPO_URL="${BUDDY_REPO_URL:-https://github.com/Abdalkaderdev/Buddy.git}"
 INSTALL_DIR="${HOME}/reachy_mini"
 VENV_DIR="${HOME}/buddy-venv"
 SERVICE_NAME="buddy.service"

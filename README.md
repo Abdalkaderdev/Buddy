@@ -42,6 +42,9 @@ That's it. No "your mental health journey." No emojis.
 
 ## What Buddy does
 
+> The robot's spoken persona is named **Sara (سارة)** — "Buddy" is the project name.
+
+- **Standalone voice mode (new):** talk to the robot directly — USB mic in, speaker out, no browser, no phone. Runs at boot as `sara-standalone.service`. Sara also *sees*: a camera frame goes to Claude with each turn, so "what am I holding?" works.
 - Listens (browser mic on your phone, or USB mic on the Pi).
 - Sees that someone is in front of it, not who. The camera reports "person here" or "empty room" and that's all that leaves the Pi.
 - Thinks using Claude Haiku 4.5 with a system prompt I rewrote a dozen times to stop it from sounding like an AI.

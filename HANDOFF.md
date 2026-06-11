@@ -6,6 +6,88 @@ This file is the only source of truth for what already happened and what's pendi
 
 ---
 
+## 🆕 SESSION UPDATE — 2026-06-12 (home laptop, hardware live)
+
+**This section supersedes anything below that contradicts it.**
+
+### The robot is now "Sara" (سارة), runs standalone on the Pi
+- Persona renamed Buddy → **Sara** everywhere user-visible (SYSTEM_PROMPT, web UI,
+  greetings, prewarm phrases). Code identifiers (`BuddyAI`, `buddy.service`,
+  `BUDDY_*` env vars, `buddy.local`) intentionally kept.
+- **New standalone voice mode** — `apps/buddy/buddy/standalone.py`. Always-on loop
+  on the Pi itself: USB mic → VAD → ElevenLabs Scribe STT (cloud, good Iraqi
+  Arabic) → Claude Haiku 4.5 (multimodal: a camera frame is sent with each turn,
+  so Sara can *see*) → ElevenLabs streaming TTS (Sarah voice
+  `EXAVITQu4vr4xnSDxMaL`, free premade) → USB speaker. No browser needed.
+- Runs as systemd user unit **`sara-standalone.service`** — **enabled at boot**.
+  The web UI `buddy.service` is **disabled at boot** (it would steal the CSI
+  camera); start it on demand: `systemctl --user start buddy.service`.
+- Latency tuned: streaming TTS (first audio ~0.3-0.5s), VAD silence hangover
+  800ms, Claude max_tokens 140. Perceived response ~3.4-4.5s.
+
+### Hardware state (all working)
+- **Camera**: OV5647 fisheye on CSI works via picamera2 (`camera_auto_detect=1`
+  in `/boot/firmware/config.txt`). Frame is rotated **90° counter-clockwise** in
+  `vision.py` because of how the module is mounted — if the camera is remounted,
+  fix the rotation there. The image has a purple/blue tint (no IR-cut filter on
+  the night-vision module) — normal, doesn't affect detection.
+- **Audio**: USB sound card = mic in + speaker out (amp + Harman Kardon).
+  PipeWire/WirePlumber config at
+  `~/.config/wireplumber/wireplumber.conf.d/51-default-volume.conf` forces new
+  sinks to 100% (PipeWire default was 40% = "speaker doesn't work").
+  Diagnostic: `bash /home/pi/check-audio.sh`.
+- ⚠️ **The original crash root-cause**: the 5W amp powered from GPIO pin 2 pulls
+  current spikes at high volume → 5V rail sags → USB sound card drops, then the
+  kernel hung and corrupted the SD card (full reflash was needed 2026-06-11).
+  **Recommendation: power the amp from its own USB cable/supply, not GPIO.**
+
+### Access (IMPORTANT for remote support)
+- Pi was **reflashed 2026-06-11**: Raspberry Pi OS 64-bit Trixie, hostname
+  `buddy`, user `pi`, password `buddy1234`, passwordless sudo, SSH key auth from
+  the home laptop (`abdal@windows` ed25519).
+- **Tailscale is installed and enabled on the Pi**: node `buddy-1`, IP
+  **`100.89.154.122`** (the old offline `buddy` node in the tailnet is stale —
+  delete it in the admin console). From any network:
+  `ssh pi@100.89.154.122`. The laptop also has Tailscale installed (`soapbox`).
+- `buddy.local` only resolves on the same WiFi. WiFi = `Real House` /
+  `Tareq5822` (also the iPhone hotspot SSID — Pi auto-joins either).
+- HTTPS cert (self-signed) covers `buddy.local`, `localhost`, `127.0.0.1`, and
+  both Tailscale IPs. Web UI: `https://buddy.local:8080`.
+
+### Keys (values in `~/.buddy.env` on the Pi, chmod 600 — NOT in the repo)
+- `ANTHROPIC_API_KEY` — fresh key created 2026-06-11 (old leaked one is dead).
+- `ELEVENLABS_API_KEY` — free tier. **Free tier cannot use library voices** —
+  only premade ones (Sarah works, the old `rFDdsCQRZCUL8cPOWtnP` returns 402).
+- `ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL` (Sarah).
+- A copy of the Anthropic key is in the laptop's user env (`ANTHROPIC_API_KEY`).
+
+### Gotchas discovered this session
+1. `setup_pi.sh` used to default to the upstream pollen-robotics repo — fixed
+   to default to `Abdalkaderdev/Buddy.git` (this very commit).
+2. Whisper-tiny on the Pi is slow + poor at Iraqi Arabic → standalone uses
+   ElevenLabs Scribe (cloud) for STT instead. Local Whisper stays as fallback
+   and for the web UI `/api/transcribe`.
+3. Only ONE process can hold the CSI camera (libcamera) — never run
+   `buddy.service` and `sara-standalone.service` at the same time with camera on.
+4. Stray `nohup python -m buddy.standalone` orphans = "multiple voices answer
+   me at once". Always manage Sara via
+   `systemctl --user restart sara-standalone`, never raw nohup.
+5. A blanket sed rename of بدي → سارة corrupts Arabic words *containing* بدي
+   (e.g. نبدي "we begin"). Was caught and reverted — be careful with Arabic sed.
+
+### Quick runbook
+```bash
+ssh pi@100.89.154.122                                  # from anywhere (Tailscale)
+systemctl --user status sara-standalone                # is Sara alive?
+journalctl --user-unit=sara-standalone -f              # live logs
+systemctl --user restart sara-standalone               # restart voice loop
+systemctl --user start buddy.service                   # web UI on demand
+bash /home/pi/check-audio.sh                           # speaker/mic diagnostic
+curl -sk https://localhost:8080/api/camera-state       # camera presence (web UI mode)
+```
+
+---
+
 ## 👤 User context
 
 - **Name:** Abd / Abdalkader (GitHub: [@Abdalkaderdev](https://github.com/Abdalkaderdev))
