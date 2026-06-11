@@ -49,7 +49,8 @@ except ImportError:
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "rFDdsCQRZCUL8cPOWtnP")
-ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+# turbo_v2_5 is ~3x faster than multilingual_v2 and still supports Arabic + English.
+ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
 _eleven_client = None
 
 # ---- Caches ----
@@ -279,7 +280,59 @@ async def startup():
     else:
         print("[CAMERA] disabled via BUDDY_CAMERA=0")
 
+    # Pre-warm Whisper model so the FIRST user STT call doesn't pay model-load latency
+    threading.Thread(target=_prewarm_whisper, daemon=True, name="buddy-prewarm-stt").start()
+    # Pre-warm TTS cache with common Iraqi/English short phrases Buddy says often
+    asyncio.create_task(_prewarm_tts())
+
     print("Buddy is ready!")
+
+
+def _prewarm_whisper():
+    """Load Whisper model into RAM on startup so first user call is instant."""
+    try:
+        from .audio import get_stt
+        t0 = time.time()
+        get_stt()  # forces model load
+        print(f"[STT] Whisper pre-warmed in {time.time() - t0:.1f}s")
+    except Exception as e:
+        print(f"[STT] Pre-warm failed (will load lazily): {e}")
+
+
+# Common short phrases Buddy is likely to say first.
+# These get TTS-generated at boot and cached, so the very first reply of a
+# demo is instant (no ElevenLabs round-trip needed).
+PREWARM_PHRASES = [
+    "هلا! أنا بَدي، شلونك اليوم؟",
+    "هلا بيك",
+    "اي والله",
+    "زين، تره خوش سؤال",
+    "هاي والله شكلها سهلة بس قوية",
+    "خوش، خل نبدأ",
+    "اوكي خل نشتغلها سوا",
+    "Hey! I'm Buddy, how are you today?",
+    "Sure, let's do it.",
+    "Good question.",
+]
+
+
+async def _prewarm_tts():
+    """Run a few common phrases through ElevenLabs in the background so the
+    cache is hot before the user's first interaction. Failures are silent."""
+    if not (ELEVENLABS_API_KEY and ELEVENLABS_SDK_AVAILABLE):
+        return
+    # Tiny delay so we don't block startup
+    await asyncio.sleep(2)
+    for phrase in PREWARM_PHRASES:
+        try:
+            t0 = time.time()
+            audio = await _tts_elevenlabs(phrase)
+            if audio:
+                print(f"[TTS] pre-warmed ({len(phrase)} chars) in {time.time()-t0:.1f}s")
+        except Exception as e:
+            print(f"[TTS] pre-warm error for {phrase[:20]!r}: {e}")
+        await asyncio.sleep(0.3)  # gentle pacing for ElevenLabs free tier
+    print("[TTS] pre-warm complete — cache primed")
 
 
 @app.on_event("shutdown")
@@ -344,7 +397,9 @@ async def transcribe(audio: UploadFile = File(...), lang: str = "en"):
                     return {"error": f"audio too large (cap {MAX_AUDIO_UPLOAD // 1024} KB)"}
                 f.write(chunk)
         try:
+            t0 = time.time()
             text = stt.transcribe(path)
+            print(f"[TIMING] STT took {time.time()-t0:.2f}s  -> {text[:60]!r}")
             return {"text": text}
         except Exception as e:
             import traceback
@@ -434,8 +489,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     # Inject what the camera sees right now
                     context = _camera_context() if ENABLE_CAMERA else None
+                    t_ai = time.time()
                     response, actions = ai.chat(user_message, context=context, lang=lang)
-                    print(f"[SERVER] AI response: {response[:50]}...")
+                    print(f"[TIMING] ai.chat took {time.time()-t_ai:.2f}s; response={response[:50]!r}")
 
                     # Execute robot actions
                     if motion and actions:
@@ -452,8 +508,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     tts_voice_key, tts_voice_code = _pick_voice_for_lang(detected, voice_key)
                     if tts_voice_key != voice_key:
                         print(f"[SERVER] Reply lang={detected} -> override voice to {tts_voice_key}")
-                    print(f"[SERVER] Generating TTS with voice: {tts_voice_code}")
+                    t_tts = time.time()
                     audio_data = await text_to_speech(response, tts_voice_code)
+                    print(f"[TIMING] TTS took {time.time()-t_tts:.2f}s  (audio={'yes' if audio_data else 'NONE'})")
 
                     # Send response back
                     await websocket.send_json({

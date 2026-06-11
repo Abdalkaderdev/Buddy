@@ -121,14 +121,19 @@ class BuddyAI:
         return response["message"]["content"]
 
     def _chat_claude(self) -> str:
-        """Chat using Claude API."""
+        """Chat using Claude API. Capped at 180 tokens — Buddy is supposed to be
+        snappy. Anything longer = slow reply + heavy TTS bill."""
+        import time as _t
+        t0 = _t.time()
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=256,
+            max_tokens=180,
             system=SYSTEM_PROMPT,
-            messages=self.conversation_history
+            messages=self.conversation_history,
         )
-        return response.content[0].text
+        out = response.content[0].text
+        print(f"[AI] Claude {_t.time()-t0:.2f}s  in={len(self.conversation_history)} turns  out={len(out)} chars")
+        return out
 
     def _parse_actions(self, text: str) -> list[str]:
         """Extract [ACTION:name] tags from response."""
