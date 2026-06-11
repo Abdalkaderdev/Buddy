@@ -145,7 +145,43 @@ robot = None
 motion = None
 
 # Connected websocket clients
-clients: list[WebSocket] = []
+clients: set[WebSocket] = set()
+
+# ---- Guardrails ----
+# Per-WebSocket sliding-window rate limit for chat messages.
+# Max RATE_LIMIT_MAX messages per RATE_LIMIT_WINDOW seconds.
+RATE_LIMIT_MAX = 12
+RATE_LIMIT_WINDOW = 60.0
+_chat_timestamps: dict[WebSocket, "collections.deque[float]"] = {}
+
+# Hard cap on inbound user message length (chars). Anything longer is rejected.
+MAX_USER_MESSAGE_CHARS = 2000
+
+# Safety-net cap on LLM output sent to TTS (chars). Prevents runaway replies
+# from burning ElevenLabs credits or saturating the audio channel.
+MAX_RESPONSE_CHARS = 1500
+
+# Origin allowlist for WebSocket connections. A loose Tailscale 100.x.x.x match
+# is also permitted so the user's own devices on the tailnet still work.
+ALLOWED_ORIGINS = {
+    "https://buddy.local:8080",
+    "https://localhost:8080",
+    "https://127.0.0.1:8080",
+}
+_TAILSCALE_ORIGIN_RE = re.compile(r"^https?://100\.\d+\.\d+\.\d+(:\d+)?$")
+
+
+def _origin_allowed(origin: str | None) -> bool:
+    """Return True if the WebSocket Origin header is on the allowlist."""
+    if not origin:
+        # No origin header (e.g. native client / curl) — allow, since the
+        # browser cross-origin attack vector requires an origin header.
+        return True
+    if origin in ALLOWED_ORIGINS:
+        return True
+    if _TAILSCALE_ORIGIN_RE.match(origin):
+        return True
+    return False
 
 # Camera face-detection state — written by the camera worker thread,
 # read by the chat handler to inject context into Claude prompts.
@@ -454,8 +490,17 @@ async def test_voice(voice_key: str):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Handle WebSocket connections for real-time chat."""
+    # Origin allowlist — reject cross-origin pages on the same Wi-Fi from
+    # driving Buddy's chat. Tailscale 100.x.x.x origins are accepted.
+    origin = websocket.headers.get("origin")
+    if not _origin_allowed(origin):
+        print(f"[WS] rejected connection — disallowed origin: {origin!r}")
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
-    clients.append(websocket)
+    clients.add(websocket)
+    _chat_timestamps[websocket] = collections.deque()
 
     # Default: Iraqi Arabic. Switches language automatically as user speaks.
     default_voice = "ar-iq-female"
@@ -465,16 +510,20 @@ async def websocket_endpoint(websocket: WebSocket):
         "lang": VOICES[default_voice]["lang"],
     }
 
-    # Welcome message in Arabic
-    welcome_text = "هلا! أنا بَدي، صديقك الروبوت. شلونك اليوم؟"
-    welcome_audio = await text_to_speech(welcome_text, user_settings[websocket]["voice_code"])
-    await websocket.send_json({
-        "type": "message",
-        "role": "assistant",
-        "content": welcome_text,
-        "actions": ["perk_antennas"],
-        "audio": welcome_audio
-    })
+    # Welcome message in Arabic — wrapped so a TTS failure here doesn't
+    # kill the whole connection before chat can start.
+    try:
+        welcome_text = "هلا! أنا بَدي، صديقك الروبوت. شلونك اليوم؟"
+        welcome_audio = await text_to_speech(welcome_text, user_settings[websocket]["voice_code"])
+        await websocket.send_json({
+            "type": "message",
+            "role": "assistant",
+            "content": welcome_text,
+            "actions": ["perk_antennas"],
+            "audio": welcome_audio
+        })
+    except Exception as e:
+        print(f"[WS] welcome send failed: {type(e).__name__}: {e} — continuing without greeting")
 
     # Send available voices
     await websocket.send_json({
@@ -490,6 +539,28 @@ async def websocket_endpoint(websocket: WebSocket):
             if data.get("type") == "chat":
                 user_message = data.get("message", "")
 
+                # --- Guardrail: per-ws sliding-window rate limit ---
+                now = time.time()
+                dq = _chat_timestamps.setdefault(websocket, collections.deque())
+                while dq and now - dq[0] > RATE_LIMIT_WINDOW:
+                    dq.popleft()
+                if len(dq) >= RATE_LIMIT_MAX:
+                    is_ar = user_settings.get(websocket, {}).get("lang", "en") == "ar"
+                    msg = "شوي مهلة" if is_ar else "Slow down a moment"
+                    await websocket.send_json({"type": "system", "content": msg})
+                    print(f"[WS] rate-limited ({len(dq)} msgs in {RATE_LIMIT_WINDOW}s)")
+                    continue
+                dq.append(now)
+
+                # --- Guardrail: user message length cap ---
+                if len(user_message) > MAX_USER_MESSAGE_CHARS:
+                    is_ar = user_settings.get(websocket, {}).get("lang", "en") == "ar"
+                    msg = ("رسالتك طويلة، اختصرها شوي"
+                           if is_ar else "Message too long, please shorten")
+                    await websocket.send_json({"type": "system", "content": msg})
+                    print(f"[WS] rejected oversized message ({len(user_message)} chars)")
+                    continue
+
                 if user_message.strip():
                     # Get AI response with current language setting
                     lang = user_settings[websocket].get("lang", "en")
@@ -502,6 +573,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     t_ai = time.time()
                     response, actions = ai.chat(user_message, context=context, lang=lang)
                     print(f"[TIMING] ai.chat took {time.time()-t_ai:.2f}s; response={response[:50]!r}")
+
+                    # --- Guardrail: clip overly long LLM output before TTS ---
+                    if len(response) > MAX_RESPONSE_CHARS:
+                        print(f"[WS] clipping response from {len(response)} -> {MAX_RESPONSE_CHARS} chars")
+                        response = response[:MAX_RESPONSE_CHARS].rstrip() + "…"
 
                     # Execute robot actions
                     if motion and actions:
@@ -569,9 +645,9 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         print(f"[WS] unexpected error: {type(e).__name__}: {e}")
     finally:
-        if websocket in clients:
-            clients.remove(websocket)
+        clients.discard(websocket)
         user_settings.pop(websocket, None)
+        _chat_timestamps.pop(websocket, None)
 
 
 # Mount static files

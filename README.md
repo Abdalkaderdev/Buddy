@@ -1,10 +1,10 @@
 # Buddy
 
-**An AI study companion and mental health support presence for university students — built on a Raspberry Pi 4 for about $31.**
+A small AI study companion that also sits with you when you're stressed. Runs on a Raspberry Pi 4. The hardware costs about $31 from a shop in Erbil.
 
-Buddy is a voice-first, Iraqi-Arabic-by-default companion designed for university students in Erbil, Iraq. It listens, helps with hard coursework, and offers a warm, judgment-free presence when stress, loneliness, or anxiety hit at 2 AM — when no one else is awake and a therapist is out of reach.
+I built this because I got tired of opening ChatGPT alone at 2 AM during finals and getting a tab full of generic American self-help. Buddy speaks Iraqi Arabic by default, switches to English when I do, and doesn't pretend to be a therapist.
 
-> **Buddy is not a therapist.** It is a small, kind presence that listens, validates, suggests grounding techniques, and *always defers to a human* when a student is in crisis. Verified local crisis resources live in [`RESOURCES.md`](./RESOURCES.md).
+> Buddy is **not** a therapist. It listens, suggests a grounding technique if it helps, and points at a real human (number in [`RESOURCES.md`](./RESOURCES.md)) when something is bigger than a chatbot.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -28,66 +28,60 @@ Buddy is a voice-first, Iraqi-Arabic-by-default companion designed for universit
 └──────────────────────────────────────────────────────────────┘
 ```
 
-## Why Buddy exists
+## Why I built this
 
-Iraqi university students rarely get accessible mental health care. Even at the
-local rate of around **$5 per therapy visit**, many students — especially women,
-for whom stigma is sharper — never go. A culture that still treats anxiety and
-burnout as weakness, combined with packed schedules and patchy WiFi, means most
-students cope alone.
+A therapy visit in Erbil is around $5. That sounds cheap until you realize a lot of students can't spare it, and a lot more won't go anyway because the family doesn't take "anxiety" seriously. For women the stigma is worse. So most people I know just don't talk to anyone, ride it out, fail an exam, sleep badly for a month.
 
-Buddy doesn't replace therapy, a friend, or a parent. It is a **warm presence
-at 2 AM** that:
+Buddy isn't a fix. It's just something that's awake at 3 AM when the rest of your phone is depressing and your friends are asleep. It can:
 
-- Helps you understand a hard concept before tomorrow's exam, in the language you actually think in.
-- Listens when you're spiraling, validates the feeling, and walks you through a 60-second grounding technique.
-- Recognizes when a moment is bigger than itself, and gently hands you off to a human — a friend, a family member, or one of the verified hotlines in [`RESOURCES.md`](./RESOURCES.md).
+- Explain a hard concept in plain words (Iraqi Arabic if you want).
+- Listen when you're spiraling and walk you through a 60-second breathing thing.
+- Notice when the conversation got serious and tell you, clearly, "this is bigger than me, please call someone" — with a real verified number from [`RESOURCES.md`](./RESOURCES.md).
+
+That's it. No "your mental health journey." No emojis.
 
 ## What Buddy does
 
-- **Listens** — push-to-talk web mic, or USB mic on the Pi
-- **Sees** — face *presence* detection (not recognition): Buddy knows someone is there, not who
-- **Thinks** — Claude Haiku 4.5, with a system prompt tuned for warmth, humility, and safety
-- **Talks back** — Edge TTS, Iraqi Arabic by default, switches to English mid-sentence when you do
-- **Works from anything on your WiFi** — phone, laptop, tablet, no app install
+- Listens (browser mic on your phone, or USB mic on the Pi).
+- Sees that someone is in front of it, not who. The camera reports "person here" or "empty room" and that's all that leaves the Pi.
+- Thinks using Claude Haiku 4.5 with a system prompt I rewrote a dozen times to stop it from sounding like an AI.
+- Talks back using ElevenLabs (or Edge TTS as a free fallback). Iraqi Arabic default, switches to English mid-sentence if I do.
+- Works from any device on the same WiFi. No app install. Phone, laptop, an iPad if you have one.
 
-### Three modes
+### The two modes (it picks by reading the room)
 
-| Mode | What it does |
+| Mode | What happens |
 |---|---|
-| **Study** | Explains hard ideas simply, using analogies a student in Erbil would actually understand (the suq, traffic on 100m Road, exam season at SUE/SUH). |
-| **Support** | When a student is overwhelmed: listens first, validates the feeling, offers a short grounding technique (5-4-3-2-1, box breathing). Never preachy. |
-| **Safety hand-off** | If a conversation suggests crisis — self-harm, abuse, an unsafe situation — Buddy stops being clever and says, clearly, "I'm not the right helper for this. Please talk to a person." Then surfaces the right entry from [`RESOURCES.md`](./RESOURCES.md). |
+| Study | Explains the idea in one line, breaks it into 2–3 steps, gives an analogy from daily life here (chai cooling, the bakery line, traffic on 100m Road), then quizzes you back. |
+| Support | Reflects what you said first, no fix-it reflex, asks one open question. Offers a grounding thing only if you keep talking. No jokes when you're hurting. |
 
-## What makes Buddy different from ChatGPT
+There's also a hard safety hand-off: if you say something that suggests crisis, Buddy stops being clever, says it isn't the right helper, and gives you the ambulance number (122) plus Jiyan Foundation in Erbil (066 264 7979). Those numbers are verified by hand, not scraped.
 
-1. **Iraqi Arabic by default.** Not MSA, not Egyptian. The dialect students actually speak.
-2. **Knows local crisis resources.** Verified Iraqi and Kurdistan-region hotlines and student counseling lines live in [`RESOURCES.md`](./RESOURCES.md), not buried in a generic global list.
-3. **Runs on a $31 Raspberry Pi anyone in Erbil can build.** No subscription, no app store, no account.
-4. **Voice-first.** A student curled up at 2 AM can talk to Buddy without typing.
-5. **Private by design.** Buddy runs locally on the Pi over your WiFi. Only the text of your message goes to the LLM provider — no camera frames, no audio recordings, no identity. Face detection runs on-device and reports presence only ("someone is here" / "no one is here").
+## What makes Buddy different from "just use ChatGPT"
 
-## Hardware — ~40,000 IQD ($31) total
+1. Iraqi Arabic by default. Not MSA, not Khaliji, not Egyptian. The way you actually talk.
+2. Knows local resources. The numbers in [`RESOURCES.md`](./RESOURCES.md) are Erbil-specific and double-checked.
+3. Runs on a $31 Raspberry Pi I bought from ecity-iq. No subscription, no account, no app store.
+4. Voice-first. You don't have to type when you're already exhausted.
+5. The camera does presence detection on the Pi. No images leave the device, ever. Only the text of what you said gets sent to Claude. No audio recording, no who-you-are, no log file.
 
-All parts sourced from [ecity-iq.com](https://ecity-iq.com/) in Erbil. Full
-build with prices and direct links is in
-[`buddy_electronics_shopping_list.docx`](./buddy_electronics_shopping_list.docx).
+## Hardware — about 40,000 IQD ($31)
+
+I sourced everything locally at [ecity-iq.com](https://ecity-iq.com/). Full list with direct links and prices is in [`buddy_electronics_shopping_list.docx`](./buddy_electronics_shopping_list.docx).
 
 | Part | Price |
 |---|---|
-| Raspberry Pi 4 B (your own) | — |
+| Raspberry Pi 4 B (already had it) | — |
 | Pi 4 USB-C 5V power supply | 5,500 IQD |
 | Night Vision Fisheye Camera 5MP 160° | 25,000 IQD |
-| USB Sound Card + mini microphone | 3,500 IQD |
-| Mono 5W amplifier board | 1,250 IQD |
+| USB sound card + mini mic | 3,500 IQD |
+| Mono 5W amp board | 1,250 IQD |
 | Harman Kardon 1.5" 40mm 4Ω speaker | 5,000 IQD |
-| **Total** | **~40,250 IQD** |
+| Total | ~40,250 IQD |
 
-See [`apps/buddy/README.md`](./apps/buddy/README.md) for the wiring guide.
+Wiring instructions are in [`apps/buddy/README.md`](./apps/buddy/README.md). I broke a camera ribbon once doing this, so I added pinout warnings throughout.
 
-## Quick start — laptop simulator (no Pi needed)
-
-You can try Buddy on your laptop before any hardware arrives:
+## Run it on your laptop first (no Pi needed)
 
 ```bash
 git clone https://github.com/Abdalkaderdev/Buddy.git
@@ -105,11 +99,11 @@ set ANTHROPIC_API_KEY=sk-ant-...                    # Windows
 python -m buddy.server
 ```
 
-Open <http://localhost:8080> in Chrome or Edge, click the purple mic, and talk.
+Open <http://localhost:8080> in Chrome or Edge. Tap the mic. Talk.
 
-## Quick start — on the Raspberry Pi
+## Run it on the Pi
 
-After flashing Raspberry Pi OS 64-bit with Wi-Fi and SSH enabled:
+After flashing Raspberry Pi OS 64-bit with WiFi + SSH from the Imager:
 
 ```bash
 ssh pi@buddy.local
@@ -119,43 +113,51 @@ chmod 600 ~/.buddy.env
 systemctl --user restart buddy.service
 ```
 
-Open `http://buddy.local:8080` from any device on the same Wi-Fi.
+Open `http://buddy.local:8080` from any device on the same WiFi.
 
-Full setup including hardware wiring is in [`apps/buddy/README.md`](./apps/buddy/README.md).
+If you want remote access from anywhere (uni WiFi, phone hotspot, your friend's house), install Tailscale on the Pi and on your phone. The Pi gets a 100.x.x.x IP that works everywhere the Pi has internet.
 
-## Ethics & safety
+Full hardware wiring is in [`apps/buddy/README.md`](./apps/buddy/README.md).
 
-Building a "mental health" tool on top of an LLM is a serious thing to do. Buddy's design assumes the LLM can be wrong and that students may turn to it in vulnerable moments. The rules:
+## Ethics + safety (I have to put this here)
 
-- **Buddy is not a therapist** and never claims to be one. The system prompt makes this explicit, and Buddy will say it out loud when relevant.
-- **Crisis = human, every time.** Any signal of self-harm, abuse, or acute danger triggers a hand-off script that points the student at a verified human resource from [`RESOURCES.md`](./RESOURCES.md).
-- **Resources are verified, not scraped.** Every hotline and counseling number in `RESOURCES.md` is checked manually before it ships.
-- **Privacy is the default.** Buddy runs on your Pi, on your WiFi. The camera does presence detection on-device — no face recognition, no images leave the Pi. Only the text of your spoken message goes to the LLM provider for a response; no audio, no video, no account, no log of who you are.
-- **No data collection for training.** Buddy does not log conversations to disk by default and never sends them to a third party for model training.
+I'm a student, not a clinician. Building anything that sits in front of someone at a bad moment is a real responsibility. The rules I gave myself:
+
+- Buddy says "I'm not a therapist" out loud the moment it matters.
+- Any signal of self-harm or acute danger triggers a hand-off with a real phone number and a strong push to call a human. No improvising.
+- Every hotline in `RESOURCES.md` was checked by hand. If I couldn't verify it, I marked it `[VERIFY before using]` instead of inventing one.
+- Privacy is the default. The Pi stays on your WiFi. Only the text of your sentence goes to Claude. No camera frames leave the box. No audio is stored. There's no account.
+- I don't log conversations or send them anywhere for model training.
+
+If any of this breaks, I'd rather hear about it on a GitHub issue than find out from a news article.
 
 ## Project layout
 
 ```
 .
 ├── README.md                              # this file
-├── RESOURCES.md                           # verified Iraqi/Kurdistan crisis & support hotlines
-├── DEMO_DAY.md                            # one-page demo day reference
-├── DEMO_PLAN.md                           # full 5-minute demo script + Q&A
-├── apps/buddy/                            # the Buddy app
+├── RESOURCES.md                           # verified Iraq/Kurdistan crisis lines
+├── KNOWLEDGE.md                           # grounding techniques + study methods (sourced)
+├── USE_CASES.md                           # examples of what to ask Buddy
+├── SAFETY_TESTS.md                        # adversarial phrases to run before demo
+├── DEMO_DAY.md                            # one-page demo reference
+├── DEMO_PLAN.md                           # 5-minute demo script + Q&A
+├── SLIDES.md                              # 12-slide presentation, Marp-compatible
+├── HANDOFF.md                             # context dump for the next dev session
+├── apps/buddy/                            # the app
 │   ├── README.md                          # hardware build + dev guide
 │   ├── pyproject.toml
 │   ├── scripts/setup_pi.sh                # one-shot Pi installer
 │   └── buddy/
-│       ├── server.py                      # FastAPI + WebSocket web UI
-│       ├── ai.py                          # Claude / Ollama provider
+│       ├── server.py                      # FastAPI + WebSocket
+│       ├── ai.py                          # Claude / Ollama
 │       ├── audio.py                       # Whisper STT + Edge TTS
-│       ├── vision.py                      # OpenCV face *presence*
-│       ├── motion.py                      # (optional) physical motion
+│       ├── vision.py                      # OpenCV face presence
+│       ├── motion.py                      # optional Reachy Mini motors
 │       ├── config.py                      # personality + safety prompts
-│       └── static/                        # web UI (HTML/CSS/JS)
-├── scripts/make_shopping_list.py          # regenerates the .docx parts list
-├── plan.md                                # original project plan
-└── buddy_electronics_shopping_list.docx   # printable shopping list
+│       └── static/                        # web UI
+├── scripts/make_shopping_list.py
+└── buddy_electronics_shopping_list.docx
 ```
 
 ## Configuration
@@ -166,18 +168,21 @@ Edit [`apps/buddy/buddy/config.py`](./apps/buddy/buddy/config.py):
 |---|---|
 | `LLM_PROVIDER` | `"claude"` (or `"ollama"` for fully local) |
 | `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` |
-| `SYSTEM_PROMPT` | Buddy's personality, study + support + safety rules |
-| `TTS_VOICE` | Iraqi Arabic by default; switches to English when the student does |
-| `VOICES` | 12 voices, 4 dialects |
+| `SYSTEM_PROMPT` | the Buddy personality + safety + Iraqi vocab rules |
+| `TTS_VOICE` | Iraqi Arabic default, switches to English when the student does |
+| `VOICES` | 12 edge-tts voices, 4 dialects, used as fallback |
 
-Env vars on the server:
+Server env vars:
 
 | Var | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude API key |
+| `ANTHROPIC_API_KEY` | Claude key |
+| `ELEVENLABS_API_KEY` | optional; if set, uses ElevenLabs Turbo v2.5 |
+| `ELEVENLABS_VOICE_ID` | which ElevenLabs voice (default: Laura) |
 | `BUDDY_CAMERA` | `0` to disable camera presence detection |
 | `BUDDY_CAMERA_INDEX` | which `/dev/videoN` to use (default 0) |
+| `BUDDY_SSL_CERT` / `BUDDY_SSL_KEY` | paths to a self-signed cert for HTTPS (needed for mic in browser) |
 
 ## License
 
-MIT.
+MIT. Use it, fork it, write your own version for your own city.

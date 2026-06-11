@@ -114,10 +114,15 @@ class BuddyAI:
         return clean_text, actions
 
     def _chat_ollama(self) -> str:
-        """Chat using Ollama (local). Universal bilingual system prompt."""
+        """Chat using Ollama (local). Universal bilingual system prompt.
+        num_predict cap prevents runaway local-LLM replies from saturating TTS."""
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(self.conversation_history)
-        response = ollama.chat(model=self.model, messages=messages)
+        response = ollama.chat(
+            model=self.model,
+            messages=messages,
+            options={"num_predict": 250},
+        )
         return response["message"]["content"]
 
     def _chat_claude(self) -> str:
