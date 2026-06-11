@@ -55,7 +55,7 @@ echo "==> Installing Buddy and its dependencies"
 # Skip Buddy's declared deps (--no-deps) to avoid the reachy-mini → PyGObject →
 # Cairo dependency chain. On the no-motor Pi build we don't need reachy-mini.
 pip install --no-deps -e "${INSTALL_DIR}/apps/buddy"
-pip install anthropic ollama faster-whisper edge-tts opencv-python \
+pip install anthropic ollama faster-whisper edge-tts elevenlabs opencv-python \
     fastapi uvicorn websockets sounddevice scipy python-multipart numpy
 
 echo "==> Writing systemd user service"

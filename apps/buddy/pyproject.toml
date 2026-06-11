@@ -9,6 +9,7 @@ dependencies = [
     "anthropic",
     "faster-whisper",
     "edge-tts",
+    "elevenlabs",
     "sounddevice",
     "scipy",
     "opencv-python",

@@ -39,6 +39,49 @@ try:
 except ImportError:
     TTS_AVAILABLE = False
 
+# ElevenLabs is the preferred TTS when ELEVENLABS_API_KEY is set.
+# Falls back to edge_tts (free, lower quality) otherwise.
+try:
+    from elevenlabs.client import ElevenLabs
+    ELEVENLABS_SDK_AVAILABLE = True
+except ImportError:
+    ELEVENLABS_SDK_AVAILABLE = False
+
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "rFDdsCQRZCUL8cPOWtnP")
+ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+_eleven_client = None
+
+
+def _get_eleven_client():
+    global _eleven_client
+    if _eleven_client is None and ELEVENLABS_API_KEY and ELEVENLABS_SDK_AVAILABLE:
+        _eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+    return _eleven_client
+
+
+async def _tts_elevenlabs(text: str) -> str | None:
+    """Synthesize via ElevenLabs Multilingual v2. Returns base64 mp3 or None."""
+    client = _get_eleven_client()
+    if not client:
+        return None
+
+    def _gen():
+        chunks = client.text_to_speech.convert(
+            voice_id=ELEVENLABS_VOICE_ID,
+            text=text,
+            model_id=ELEVENLABS_MODEL,
+            output_format="mp3_44100_128",
+        )
+        return b"".join(chunks)
+
+    try:
+        audio = await asyncio.to_thread(_gen)
+        return base64.b64encode(audio).decode("utf-8")
+    except Exception as e:
+        print(f"[TTS][elevenlabs] error: {e} — falling back to edge_tts")
+        return None
+
 try:
     from reachy_mini import ReachyMini
     from .motion import BuddyMotion
@@ -126,8 +169,20 @@ def _camera_context() -> dict:
 
 
 async def text_to_speech(text: str, voice: str = TTS_VOICE) -> str | None:
-    """Convert text to speech and return base64 encoded audio."""
-    print(f"[TTS] Generating speech with voice: {voice}")
+    """Convert text to speech and return base64-encoded MP3.
+
+    Prefers ElevenLabs (Multilingual v2) when ELEVENLABS_API_KEY is set,
+    falls back to edge-tts (free) otherwise. The `voice` argument is only
+    used for edge-tts; ElevenLabs uses ELEVENLABS_VOICE_ID.
+    """
+    if ELEVENLABS_API_KEY and ELEVENLABS_SDK_AVAILABLE:
+        print(f"[TTS][elevenlabs] voice={ELEVENLABS_VOICE_ID} chars={len(text)}")
+        result = await _tts_elevenlabs(text)
+        if result is not None:
+            return result
+        # fall through to edge_tts on failure
+
+    print(f"[TTS][edge] Generating speech with voice: {voice}")
     if not TTS_AVAILABLE:
         return None
 
