@@ -110,7 +110,7 @@ class BuddyAI:
             self.conversation_history = self.conversation_history[-20:]
 
         actions = self._parse_actions(response_text)
-        clean_text = self._clean_response(response_text)
+        clean_text = self._clean_response(response_text, user_message=user_message)
         return clean_text, actions
 
     def _chat_ollama(self) -> str:
@@ -140,19 +140,53 @@ class BuddyAI:
         pattern = r'\[ACTION:(\w+)\]'
         return re.findall(pattern, text)
 
-    def _clean_response(self, text: str) -> str:
-        """Strip meta-tags and inject real resources before TTS / display."""
+    # Broad regex — Claude may write [see RESOURCES], [See Resources], [RESOURCES],
+    # [الموارد], [انظر RESOURCES], [see resources list], etc.
+    _RESOURCES_TOKEN_RE = re.compile(
+        r"\[\s*(?:see|انظر|راجع|انظري)?\s*(?:RESOURCES?|resources?|الموارد|مصادر)[^\]]*\]",
+        re.IGNORECASE,
+    )
+    # Real verified hand-off lines (numbers from RESOURCES.md — Iraq ambulance + Jiyan Erbil)
+    _HANDOFF_AR = (
+        "لو الموضوع كبير وتحس روحك بخطر، الرجاء اتصل بالإسعاف على ١٢٢ هسه، "
+        "أو تواصل مع مؤسسة جيان في أربيل على الرقم ٠٦٦ ٢٦٤ ٧٩٧٩، يقدمون دعم مجاني."
+    )
+    _HANDOFF_EN = (
+        "If this is bigger than us, please call ambulance 122 right now, "
+        "or reach Jiyan Foundation in Erbil at 066 264 7979 — free trauma support."
+    )
+    # Crisis trigger phrases — if user message contains ANY of these AND Claude's reply
+    # didn't include the hand-off token, we force-append it. Belt and suspenders.
+    _CRISIS_PATTERNS = [
+        r"\bkill myself\b", r"\bend it\b", r"\bsuicid", r"\bhurt myself\b",
+        r"\bcut myself\b", r"\bwant to die\b", r"\bdon'?t want to (live|be here)",
+        r"\bno reason to live\b", r"\bgive up\b",
+        r"اقتل نفسي", r"انتحار", r"اريد اموت", r"أريد أن أموت", r"ما عاد اتحمل",
+        r"ما عدت أتحمل", r"تعبت من الحياة", r"ما عندي رغبة", r"اذي نفسي",
+        r"أذي نفسي", r"أؤذي نفسي", r"ما لي خاطر اعيش",
+    ]
+    _CRISIS_RE = re.compile("|".join(_CRISIS_PATTERNS), re.IGNORECASE)
+
+    def _clean_response(self, text: str, user_message: str = "") -> str:
+        """Strip meta-tags and inject real resources before TTS / display.
+
+        Safety net: if the user's message contains crisis keywords AND Claude's reply
+        doesn't already include the hand-off token, we prepend the hand-off so the
+        user always sees real human resources — never just a warm reply alone.
+        """
         # Strip leaked instruction tags Claude sometimes echoes from the prompt
         text = re.sub(r"\[Instructions?:[^\]]*\]\s*", "", text, flags=re.IGNORECASE)
-        # Replace the [see RESOURCES] safety token with a spoken-friendly hand-off
-        if re.search(r"\[see\s*RESOURCES\]", text, flags=re.IGNORECASE):
-            is_arabic = bool(re.search(r"[؀-ۿ]", text))
-            replacement = (
-                "ممكن تتصل بمؤسسة جيان في أربيل، الأرقام كاملة بملف RESOURCES بالمستودع"
-                if is_arabic
-                else "You can reach Jiyan Foundation in Erbil — full verified contacts in RESOURCES.md"
-            )
-            text = re.sub(r"\[see\s*RESOURCES\]", replacement, text, flags=re.IGNORECASE)
+
+        is_arabic = bool(re.search(r"[؀-ۿ]", text))
+        handoff = self._HANDOFF_AR if is_arabic else self._HANDOFF_EN
+
+        had_token = bool(self._RESOURCES_TOKEN_RE.search(text))
+        text = self._RESOURCES_TOKEN_RE.sub(handoff, text)
+
+        # Force-append hand-off if user was in crisis and Claude forgot the token
+        if user_message and self._CRISIS_RE.search(user_message) and not had_token:
+            print(f"[SAFETY] crisis phrase detected in user msg — force-appending hand-off")
+            text = text.rstrip() + "\n\n" + handoff
         pattern = r'\[ACTION:\w+\]'
         return re.sub(pattern, '', text).strip()
 

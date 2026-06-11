@@ -192,6 +192,91 @@ html[lang="ar"] .brand-name {
 .icon-btn:active { transform: translateY(0); }
 
 /* =========================================================
+   Ethical disclaimer — quiet warmth, not a warning
+   ========================================================= */
+.disclaimer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 14px;
+    padding: 14px 18px;
+    margin: 0 2px;
+    background: var(--cream-50);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--teal-500);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-sm);
+    color: var(--ink-700);
+    font-size: 0.86rem;
+    line-height: 1.5;
+    animation: disclaimerIn var(--dur-med) var(--ease-out) both;
+    transition: opacity var(--dur-med) var(--ease-out),
+                transform var(--dur-med) var(--ease-out);
+}
+
+html[dir="rtl"] .disclaimer {
+    border-left: 1px solid var(--line);
+    border-right: 3px solid var(--teal-500);
+}
+
+.disclaimer[hidden] { display: none !important; }
+
+.disclaimer.is-dismissing {
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+}
+
+.disclaimer-text {
+    flex: 1 1 220px;
+    margin: 0;
+}
+
+.disclaimer-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.disclaimer-link {
+    color: var(--teal-700);
+    font-weight: 500;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+    font-size: 0.84rem;
+    transition: color var(--dur-fast) var(--ease-out);
+}
+
+.disclaimer-link:hover { color: var(--teal-900); }
+
+.disclaimer-dismiss {
+    padding: 6px 12px;
+    border-radius: var(--r-pill);
+    background: var(--cream-200);
+    color: var(--ink-900);
+    border: 1px solid var(--line);
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: background var(--dur-fast) var(--ease-out),
+                transform var(--dur-fast) var(--ease-out);
+}
+
+.disclaimer-dismiss:hover { background: var(--cream-300); }
+.disclaimer-dismiss:active { transform: translateY(1px); }
+.disclaimer-dismiss:focus-visible {
+    outline: 2px solid var(--teal-500);
+    outline-offset: 2px;
+}
+
+@keyframes disclaimerIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* =========================================================
    Presence area — orb + exchange cards
    ========================================================= */
 .presence-area {

@@ -62,6 +62,9 @@ const STRINGS = {
         suggest1: 'احكِ لي نكتة',
         suggest2: 'كيف حالك اليوم؟',
         suggest3: 'لِف لفّة فرح',
+        disclaimerText: 'بَدي مو طبيب نفسي. إذا كنت بأزمة، احكِ مع إنسان حقيقي.',
+        disclaimerLink: 'اقرأ المصادر الموثوقة',
+        disclaimerDismiss: 'فهمت',
     },
     en: {
         brand: 'Buddy',
@@ -83,6 +86,9 @@ const STRINGS = {
         suggest1: 'Tell me a joke',
         suggest2: 'How are you?',
         suggest3: 'Do a happy spin',
+        disclaimerText: "Buddy is not a therapist. If you're in crisis, please reach a real human.",
+        disclaimerLink: 'See verified resources',
+        disclaimerDismiss: 'Got it',
     },
 };
 
@@ -104,7 +110,34 @@ const dom = {
     voiceGrid: $('voiceGrid'),
     resetBtn: $('resetBtn'),
     langToggle: document.querySelectorAll('.lang-opt'),
+    disclaimer: $('disclaimer'),
+    disclaimerDismiss: $('disclaimerDismiss'),
 };
+
+// ----- Ethical disclaimer (mental-health context) -----
+function initDisclaimer() {
+    if (!dom.disclaimer) return;
+    let seen = false;
+    try { seen = localStorage.getItem('buddyDisclaimerSeen') === '1'; } catch (e) { /* storage blocked */ }
+    if (seen) {
+        dom.disclaimer.hidden = true;
+        return;
+    }
+    dom.disclaimer.hidden = false;
+    if (dom.disclaimerDismiss) {
+        dom.disclaimerDismiss.addEventListener('click', dismissDisclaimer);
+    }
+}
+
+function dismissDisclaimer() {
+    if (!dom.disclaimer || dom.disclaimer.hidden) return;
+    dom.disclaimer.classList.add('is-dismissing');
+    try { localStorage.setItem('buddyDisclaimerSeen', '1'); } catch (e) { /* storage blocked */ }
+    setTimeout(() => {
+        dom.disclaimer.hidden = true;
+        dom.disclaimer.classList.remove('is-dismissing');
+    }, 320);
+}
 
 // ----- Presence state -----
 function setState(s) {
@@ -625,6 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applyLang('ar');
     setState('idle');
     renderVoiceGrid();
+    initDisclaimer();
     wire();
     connect();
     // initRecorder is lazy — runs on the first mic click so the permission

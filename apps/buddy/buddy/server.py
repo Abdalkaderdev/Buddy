@@ -282,8 +282,12 @@ async def startup():
 
     # Pre-warm Whisper model so the FIRST user STT call doesn't pay model-load latency
     threading.Thread(target=_prewarm_whisper, daemon=True, name="buddy-prewarm-stt").start()
-    # Pre-warm TTS cache with common Iraqi/English short phrases Buddy says often
-    asyncio.create_task(_prewarm_tts())
+    # Pre-warm TTS cache. Await it so the cache is hot BEFORE the first connection;
+    # also avoids the OrderedDict thread-safety race between prewarm and live writes.
+    try:
+        await asyncio.wait_for(_prewarm_tts(), timeout=30)
+    except (asyncio.TimeoutError, Exception) as e:
+        print(f"[TTS] pre-warm timed out or errored: {e} — continuing")
 
     print("Buddy is ready!")
 
@@ -561,9 +565,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
 
     except WebSocketDisconnect:
-        clients.remove(websocket)
-        if websocket in user_settings:
-            del user_settings[websocket]
+        pass
+    except Exception as e:
+        print(f"[WS] unexpected error: {type(e).__name__}: {e}")
+    finally:
+        if websocket in clients:
+            clients.remove(websocket)
+        user_settings.pop(websocket, None)
 
 
 # Mount static files
