@@ -141,10 +141,18 @@ class BuddyAI:
         return re.findall(pattern, text)
 
     def _clean_response(self, text: str) -> str:
-        """Remove action tags and any leaked [Instructions:...] meta-context from
-        the response so it never reaches the user or TTS."""
+        """Strip meta-tags and inject real resources before TTS / display."""
         # Strip leaked instruction tags Claude sometimes echoes from the prompt
         text = re.sub(r"\[Instructions?:[^\]]*\]\s*", "", text, flags=re.IGNORECASE)
+        # Replace the [see RESOURCES] safety token with a spoken-friendly hand-off
+        if re.search(r"\[see\s*RESOURCES\]", text, flags=re.IGNORECASE):
+            is_arabic = bool(re.search(r"[؀-ۿ]", text))
+            replacement = (
+                "ممكن تتصل بمؤسسة جيان في أربيل، الأرقام كاملة بملف RESOURCES بالمستودع"
+                if is_arabic
+                else "You can reach Jiyan Foundation in Erbil — full verified contacts in RESOURCES.md"
+            )
+            text = re.sub(r"\[see\s*RESOURCES\]", replacement, text, flags=re.IGNORECASE)
         pattern = r'\[ACTION:\w+\]'
         return re.sub(pattern, '', text).strip()
 
