@@ -92,6 +92,34 @@ SILENCE_HANGOVER_MS = 550    # tightened for snappier turn-taking
 MAX_UTTERANCE_MS = 15_000     # hard cap
 MIN_TRANSCRIPT_CHARS = 3
 
+# --- Wake word ---
+_WAKE_WORD = os.getenv("WAKE_WORD", "").strip()
+_WAKE_ACTIVE_SECS = float(os.getenv("WAKE_ACTIVE_SECS", "35"))
+_wake_last_active = [0.0]
+_WAKE_DIAC = re.compile(r"[\u064B-\u0652\u0640]")
+
+
+def _wake_norm(t: str) -> str:
+    t = _WAKE_DIAC.sub("", t or "")
+    for a, b in (("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ى", "ي"), ("ة", "ه")):
+        t = t.replace(a, b)
+    return t
+
+
+def _wake_present(transcript: str) -> bool:
+    if not _WAKE_WORD:
+        return True
+    return _wake_norm(_WAKE_WORD) in _wake_norm(transcript)
+
+
+def _wake_strip(transcript: str) -> str:
+    if not _WAKE_WORD:
+        return transcript
+    out = re.sub(re.escape(_WAKE_WORD) + r"|يا\s+" + re.escape(_WAKE_WORD),
+                 "", transcript).strip(" ،.!؟?")
+    return out or transcript
+
+
 USB_NAME_HINT = "USB Audio Device"
 
 
@@ -698,6 +726,20 @@ async def main() -> None:
         print(f"[STT] {time.time()-t0:.2f}s -> {transcript!r}")
 
         lang = _detect_lang(transcript)
+
+        # Wake-word gate: engage only when addressed by name or within the
+        # active window after the last exchange (fewer accidental triggers).
+        if _WAKE_WORD:
+            _now = time.time()
+            if not (_now - _wake_last_active[0] < _WAKE_ACTIVE_SECS or _wake_present(transcript)):
+                print(f"[WAKE] asleep — ignoring: {transcript[:40]!r}")
+                continue
+            _stripped = _wake_strip(transcript)
+            if len(_stripped.strip()) < MIN_TRANSCRIPT_CHARS:
+                transcript = "المستخدم ناداك باسمك نبراس. رحّب بيه بجملة قصيرة وحماسية."
+            else:
+                transcript = _stripped
+            _wake_last_active[0] = _now
 
         # Instant interview answer, matched BEFORE the LLM — no credits, always identical.
         _hit = faq.match(transcript, FAQ)

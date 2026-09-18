@@ -27,6 +27,14 @@ class BuddyAI:
         self.conversation_history: list[dict] = []
         self.known_person: str | None = None
         self.language: str = "en"  # Can be "en" or "ar"
+        try:
+            from . import memory as _mem
+            self._memory = _mem.load()
+            self._mem_suffix = _mem.prompt_block(self._memory)
+        except Exception:
+            self._memory = {"name": None, "notes": []}
+            self._mem_suffix = ""
+        self._mem_turns = 0
 
         if provider == "ollama":
             if not OLLAMA_AVAILABLE:
@@ -130,6 +138,49 @@ class BuddyAI:
         clean_text = self._clean_response(response_text, user_message=user_message)
         return clean_text, actions
 
+    def refresh_memory(self) -> None:
+        """Extract durable profile facts (name, notes) from recent conversation
+        and persist them across restarts. Cheap Haiku call — run in background."""
+        if self.provider != "claude" or len(self.conversation_history) < 2:
+            return
+        try:
+            convo = "\n".join(
+                f"{m['role']}: {m['content'] if isinstance(m['content'], str) else '[image]'}"
+                for m in self.conversation_history[-12:])
+            prompt = (
+                "من هذه المحادثة، استخرج الحقائق الثابتة عن الطالب للذاكرة طويلة المدى. "
+                "رجّع JSON فقط: {\"name\": الاسم أو null, \"notes\": [ملاحظات قصيرة ثابتة بالعربي]}. "
+                "مثل: 'يدرس الهندسة'، 'عنده امتحان رياضيات'، 'يحب كرة القدم'. "
+                "فقط الثابت (الاسم، التخصص، الهموم المستمرة، التفضيلات). لا كلام عابر.\n\n" + convo)
+            resp = self.client.messages.create(
+                model=self.model, max_tokens=200,
+                system="You extract durable user-profile facts as strict JSON only.",
+                messages=[{"role": "user", "content": prompt}])
+            import json as _json
+            m = re.search(r"\{.*\}", resp.content[0].text, re.S)
+            if not m:
+                return
+            data = _json.loads(m.group(0))
+            if data.get("name"):
+                self._memory["name"] = data["name"]
+            notes = self._memory.get("notes", [])
+            for n in (data.get("notes") or []):
+                if n and n not in notes:
+                    notes.append(n)
+            self._memory["notes"] = notes[-10:]
+            from . import memory as _mem
+            _mem.save(self._memory)
+            self._mem_suffix = _mem.prompt_block(self._memory)
+            print(f"[MEMORY] updated: name={self._memory.get('name')} notes={len(self._memory.get('notes', []))}")
+        except Exception as e:
+            print(f"[MEMORY] refresh failed: {e}")
+
+    def maybe_refresh_memory(self) -> None:
+        """Throttled — real work only every 5th call, so it never adds latency."""
+        self._mem_turns = getattr(self, "_mem_turns", 0) + 1
+        if self._mem_turns % 5 == 0:
+            self.refresh_memory()
+
     def _chat_ollama(self) -> str:
         """Chat using Ollama (local). Universal bilingual system prompt.
         num_predict cap prevents runaway local-LLM replies from saturating TTS."""
@@ -180,7 +231,7 @@ class BuddyAI:
             with self.client.messages.stream(
                 model=self.model,
                 max_tokens=200,
-                system=SYSTEM_PROMPT,
+                system=SYSTEM_PROMPT + self._mem_suffix,
                 messages=self.conversation_history,
             ) as stream:
                 for delta in stream.text_stream:
@@ -208,7 +259,7 @@ class BuddyAI:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=200,
-            system=SYSTEM_PROMPT,
+            system=SYSTEM_PROMPT + self._mem_suffix,
             messages=self.conversation_history,
         )
         out = response.content[0].text
