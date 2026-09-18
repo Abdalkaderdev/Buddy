@@ -7,6 +7,7 @@ Type=simple
 WorkingDirectory=/home/pi/reachy_mini/apps/buddy
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/home/pi/.buddy.env
+ExecStartPre=-/usr/bin/amixer -c Device sset "Auto Gain Control" off
 ExecStart=/home/pi/buddy-venv/bin/python -m buddy.standalone
 Restart=on-failure
 RestartSec=3

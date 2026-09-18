@@ -89,11 +89,11 @@ BLOCK_FRAMES = CAPTURE_RATE * BLOCK_MS // 1000
 RMS_THRESHOLD = 0.065         # AGC on: floor pumps to ~0.05, speech 0.09+
 MIN_SPEECH_MS = 600           # must have this much speech before we accept utterance
 SILENCE_HANGOVER_MS = 550    # tightened for snappier turn-taking
-MAX_UTTERANCE_MS = 15_000     # hard cap
+MAX_UTTERANCE_MS = 10_000     # hard cap
 MIN_TRANSCRIPT_CHARS = 3
 
 # --- Wake word ---
-_WAKE_WORD = os.getenv("WAKE_WORD", "").strip()
+_WAKE_WORDS = [w.strip() for w in os.getenv("WAKE_WORD", "").split(",") if w.strip()]
 _WAKE_ACTIVE_SECS = float(os.getenv("WAKE_ACTIVE_SECS", "35"))
 _wake_last_active = [0.0]
 _WAKE_DIAC = re.compile(r"[\u064B-\u0652\u0640]")
@@ -107,17 +107,19 @@ def _wake_norm(t: str) -> str:
 
 
 def _wake_present(transcript: str) -> bool:
-    if not _WAKE_WORD:
+    if not _WAKE_WORDS:
         return True
-    return _wake_norm(_WAKE_WORD) in _wake_norm(transcript)
+    n = _wake_norm(transcript)
+    return any(_wake_norm(w) in n for w in _WAKE_WORDS)
 
 
 def _wake_strip(transcript: str) -> str:
-    if not _WAKE_WORD:
+    if not _WAKE_WORDS:
         return transcript
-    out = re.sub(re.escape(_WAKE_WORD) + r"|يا\s+" + re.escape(_WAKE_WORD),
-                 "", transcript).strip(" ،.!؟?")
-    return out or transcript
+    out = transcript
+    for w in _WAKE_WORDS:
+        out = re.sub(r"يا\s+" + re.escape(w) + r"|" + re.escape(w), "", out)
+    return out.strip(" ،.!؟?") or transcript
 
 
 USB_NAME_HINT = "USB Audio Device"
@@ -316,13 +318,19 @@ async def _capture_utterance(input_device: int | None) -> np.ndarray | None:
     total_ms = 0
     idle_blocks = 0
     last_idle_rms = 0.0
+    noise_floor = RMS_THRESHOLD / 3.0   # adaptive noise-floor estimate (EMA)
 
     with stream:
         print("[IDLE] waiting for speech…")
         while True:
             block = await queue.get()
             rms = _rms(block)
-            is_voice = rms > RMS_THRESHOLD
+            # Adaptive threshold: a margin above the room noise floor, so
+            # end-of-speech silence is found in a quiet room or a noisy hall.
+            eff_threshold = max(RMS_THRESHOLD, noise_floor * 2.8)
+            is_voice = rms > eff_threshold
+            if not speaking and not is_voice:
+                noise_floor = 0.92 * noise_floor + 0.08 * rms
 
             if is_voice:
                 if not speaking:
@@ -350,7 +358,7 @@ async def _capture_utterance(input_device: int | None) -> np.ndarray | None:
                     last_idle_rms = max(last_idle_rms, rms)
                     # every ~2s, print floor reading to help tune threshold
                     if idle_blocks * BLOCK_MS >= 2000:
-                        print(f"[IDLE] floor rms peak={last_idle_rms:.4f} (threshold={RMS_THRESHOLD})")
+                        print(f"[IDLE] floor={last_idle_rms:.4f} noise={noise_floor:.4f} thr={max(RMS_THRESHOLD, noise_floor*2.8):.4f}")
                         idle_blocks = 0
                         last_idle_rms = 0.0
 
@@ -778,7 +786,7 @@ async def main() -> None:
 
         # Wake-word gate: engage only when addressed by name or within the
         # active window after the last exchange (fewer accidental triggers).
-        if _WAKE_WORD:
+        if _WAKE_WORDS:
             _now = time.time()
             if not (_now - _wake_last_active[0] < _WAKE_ACTIVE_SECS or _wake_present(transcript)):
                 print(f"[WAKE] asleep — ignoring: {transcript[:40]!r}")
