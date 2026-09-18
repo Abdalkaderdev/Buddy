@@ -142,6 +142,62 @@ class BuddyAI:
         )
         return response["message"]["content"]
 
+    def is_crisis(self, user_message: str) -> bool:
+        """True if the user message trips the crisis detector. Callers use this
+        to force the safe (non-streaming) path that guarantees the hand-off,
+        because the hand-off cannot be appended to already-spoken audio."""
+        try:
+            return bool(self._CRISIS_RE.search(self._normalize_ar(user_message)))
+        except Exception:
+            return True  # fail safe: unknown -> treat as crisis -> safe path
+
+    def chat_stream(self, user_message, context=None, lang="en", image_b64=None):
+        """Streaming variant of chat() for LOW-LATENCY, NON-CRISIS turns only.
+
+        Yields Claude text deltas as they arrive; commits conversation history
+        on success. The caller MUST check is_crisis() first and route crises to
+        chat() (which force-appends the verified hand-off). Claude-only."""
+        if self.provider != "claude":
+            raise RuntimeError("chat_stream is claude-only")
+        import time as _t
+        self.language = lang
+        full_message = user_message
+        if image_b64:
+            user_content = [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
+                {"type": "text", "text": full_message},
+            ]
+        else:
+            user_content = full_message
+        pending = self.conversation_history + [{"role": "user", "content": user_content}]
+        if len(pending) > 20:
+            pending = pending[-20:]
+        saved_history = self.conversation_history
+        self.conversation_history = pending
+        t0 = _t.time()
+        parts = []
+        try:
+            with self.client.messages.stream(
+                model=self.model,
+                max_tokens=300,
+                system=SYSTEM_PROMPT,
+                messages=self.conversation_history,
+            ) as stream:
+                for delta in stream.text_stream:
+                    parts.append(delta)
+                    yield delta
+        except Exception as e:
+            self.conversation_history = saved_history
+            print(f"[AI] Claude stream failed: {type(e).__name__}: {e}")
+            raise
+        full = "".join(parts)
+        if isinstance(user_content, list):
+            self.conversation_history[-1] = {"role": "user", "content": full_message}
+        self.conversation_history.append({"role": "assistant", "content": full})
+        if len(self.conversation_history) > 20:
+            self.conversation_history = self.conversation_history[-20:]
+        print(f"[AI] Claude stream {_t.time()-t0:.2f}s out={len(full)} chars")
+
     def _chat_claude(self) -> str:
         """Chat using Claude API. max_tokens=300 is headroom, not a target —
         brevity (~350 chars) is enforced by the system prompt. 140 was too low:
@@ -189,7 +245,7 @@ class BuddyAI:
         r"\bcut myself\b", r"\bwant to die\b", r"\bdon'?t want to (live|be here)",
         r"\bno reason to live\b", r"\bgive up\b", r"\bend my life\b",
         r"\bending it\b", r"\bnot want(ing)? to be here\b",
-        r"اقتل نفسي", r"انتحار", r"اريد اموت", r"اريد ان اموت", r"ما عاد اتحمل",
+        r"اقتل نفسي", r"انتحار", r"انتحر", r"اريد اموت", r"اريد ان اموت", r"ما عاد اتحمل",
         r"ما عدت اتحمل", r"تعبت من الحياة", r"ما عندي رغبة", r"اذي نفسي",
         r"اوذي نفسي", r"ما لي خاطر اعيش", r"انهي حياتي", r"اختفي من هاي الدنيا",
     ]

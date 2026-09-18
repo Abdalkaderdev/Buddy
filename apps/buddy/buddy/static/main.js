@@ -43,14 +43,14 @@ const VOICE_CATALOG = [
 // ----- i18n -----
 const STRINGS = {
     ar: {
-        brand: 'سارة',
+        brand: 'نبراس',
         connecting: 'يتصل…',
         online: 'متصل',
         offline: 'غير متصل',
         reconnecting: 'يحاول الاتصال…',
-        tapToTalk: 'اضغط للحديث مع سارة',
+        tapToTalk: 'اضغط للحديث مع نبراس',
         listening: 'يسمعك… اضغط لتوقف',
-        speaking: 'تتحدث سارة',
+        speaking: 'تتحدث نبراس',
         thinking: 'يفكّر…',
         micUnsupported: 'يحتاج مايك Chrome أو Edge',
         settings: 'الإعدادات',
@@ -62,19 +62,19 @@ const STRINGS = {
         suggest1: 'احكِ لي نكتة',
         suggest2: 'كيف حالك اليوم؟',
         suggest3: 'لِف لفّة فرح',
-        disclaimerText: 'سارة مو طبيبة نفسي. إذا كنت بأزمة، احكِ مع إنسان حقيقي.',
+        disclaimerText: 'نبراس مو طبيبة نفسي. إذا كنت بأزمة، احكِ مع إنسان حقيقي.',
         disclaimerLink: 'اقرأ المصادر الموثوقة',
         disclaimerDismiss: 'فهمت',
     },
     en: {
-        brand: 'Sara',
+        brand: 'Nebras',
         connecting: 'Connecting…',
         online: 'Online',
         offline: 'Offline',
         reconnecting: 'Reconnecting…',
-        tapToTalk: 'Tap to talk to Sara',
+        tapToTalk: 'Tap to talk to Nebras',
         listening: 'Listening… tap to stop',
-        speaking: 'Sara is speaking',
+        speaking: 'Nebras is speaking',
         thinking: 'Thinking…',
         micUnsupported: 'Voice needs Chrome or Edge',
         settings: 'Settings',
@@ -86,7 +86,7 @@ const STRINGS = {
         suggest1: 'Tell me a joke',
         suggest2: 'How are you?',
         suggest3: 'Do a happy spin',
-        disclaimerText: "Sara is not a therapist. If you're in crisis, please reach a real human.",
+        disclaimerText: "Nebras is not a therapist. If you're in crisis, please reach a real human.",
         disclaimerLink: 'See verified resources',
         disclaimerDismiss: 'Got it',
     },
@@ -596,7 +596,7 @@ async function onRecordingStop() {
 }
 
 function toggleListening() {
-    // Tap-to-interrupt: if Sara is speaking, stop playback and start listening.
+    // Tap-to-interrupt: if Nebras is speaking, stop playback and start listening.
     if (state.isSpeaking || dom.body.dataset.state === 'speaking') {
         try {
             audioPlayer.pause();

@@ -1,4 +1,4 @@
-"""Sara standalone always-on listening loop.
+"""Nebras standalone always-on listening loop.
 
 Runs on the Pi without a browser: USB mic -> Whisper STT -> BuddyAI (Claude) ->
 TTS (ElevenLabs preferred, edge-tts fallback) -> USB speaker.
@@ -85,9 +85,9 @@ CHANNELS = 1
 BLOCK_MS = 30
 BLOCK_FRAMES = CAPTURE_RATE * BLOCK_MS // 1000
 
-RMS_THRESHOLD = 0.08         # tweak for ambient noise (USB mic on Pi runs hot)
+RMS_THRESHOLD = 0.065         # AGC on: floor pumps to ~0.05, speech 0.09+
 MIN_SPEECH_MS = 600           # must have this much speech before we accept utterance
-SILENCE_HANGOVER_MS = 800    # silence after speech => end of utterance
+SILENCE_HANGOVER_MS = 550    # tightened for snappier turn-taking
 MAX_UTTERANCE_MS = 15_000     # hard cap
 MIN_TRANSCRIPT_CHARS = 3
 
@@ -345,9 +345,158 @@ async def _capture_utterance(input_device: int | None) -> np.ndarray | None:
 
 
 # ----- Main loop -----
+class _RealtimeSTT:
+    """Warm ElevenLabs Scribe v2 Realtime connection, reused across turns.
+
+    Pays the ~0.5s WebSocket connect once, then each utterance is ~0.55s
+    (vs 1.1-2.9s for batch Scribe). Returns None on ANY problem so the caller
+    transparently falls back to the batch path. Disable with USE_REALTIME_STT=0."""
+
+    def __init__(self):
+        self._conn = None
+        self._state = {"event": None, "text": None, "err": None}
+        self._enabled = (
+            os.getenv("USE_REALTIME_STT", "1") == "1"
+            and bool(os.getenv("ELEVENLABS_API_KEY"))
+        )
+
+    async def _ensure_conn(self):
+        if self._conn is not None:
+            return self._conn
+        from elevenlabs.client import ElevenLabs
+        from elevenlabs.realtime.scribe import AudioFormat, CommitStrategy
+        client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+        conn = await client.speech_to_text.realtime.connect({
+            "model_id": "scribe_v2_realtime",
+            "audio_format": AudioFormat.PCM_16000,
+            "sample_rate": 16000,
+            "commit_strategy": CommitStrategy.MANUAL,
+            "language_code": "ara",
+        })
+        st = self._state
+
+        def _on_committed(data):
+            st["text"] = getattr(data, "text", None) or (
+                data.get("text") if isinstance(data, dict) else None)
+            if st["event"]:
+                st["event"].set()
+
+        def _on_err(data):
+            st["err"] = data
+            if st["event"]:
+                st["event"].set()
+
+        conn.on("committed_transcript", _on_committed)
+        for ev in ("error", "auth_error", "quota_exceeded", "rate_limited",
+                   "transcriber_error", "session_time_limit_exceeded",
+                   "input_error", "resource_exhausted", "queue_overflow"):
+            conn.on(ev, _on_err)
+        self._conn = conn
+        print("[STT][rt] Scribe v2 Realtime connected")
+        return conn
+
+    async def _drop(self):
+        c, self._conn = self._conn, None
+        if c is not None:
+            try:
+                await c.close()
+            except Exception:
+                pass
+
+    async def transcribe(self, audio) -> "str | None":
+        """audio: mono float32 @16k. Returns text, or None to signal fallback."""
+        if not self._enabled:
+            return None
+        try:
+            conn = await asyncio.wait_for(self._ensure_conn(), timeout=6)
+            pcm = (np.clip(audio, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+            self._state["event"] = asyncio.Event()
+            self._state["text"] = None
+            self._state["err"] = None
+            for i in range(0, len(pcm), 32000):
+                await conn.send({"audio_base_64": base64.b64encode(pcm[i:i + 32000]).decode()})
+            await conn.commit()
+            await asyncio.wait_for(self._state["event"].wait(), timeout=8)
+            if self._state["err"] is not None:
+                print(f"[STT][rt] error event: {self._state['err']}; dropping conn")
+                await self._drop()
+                return None
+            return self._state["text"]
+        except Exception as e:
+            print(f"[STT][rt] failed: {type(e).__name__}: {e}; -> batch fallback")
+            await self._drop()
+            return None
+
+
+# --- Streaming Claude -> sentence-chunked TTS (fast path, non-crisis) ---
+import re as _re_sent
+_SENT_BOUNDARY = _re_sent.compile(r"[.!?\u061F\u2026\n]")  # . ! ? Arabic-? ellipsis newline
+_MIN_SENTENCE_CHARS = 15
+
+
+async def _stream_claude_and_speak(ai, transcript, lang, frame_b64) -> bool:
+    """Stream Claude tokens; speak each completed sentence in order as it forms.
+    Returns True if any audio was spoken. Falls through (returns False) if the
+    stream yields nothing, so the caller can use the buffered path."""
+    loop = asyncio.get_running_loop()
+    sent_q: asyncio.Queue = asyncio.Queue()
+    t0 = time.time()
+    first_logged = [False]
+
+    def _produce():
+        buf = ""
+        try:
+            for delta in ai.chat_stream(transcript, context=None, lang=lang, image_b64=frame_b64):
+                buf += delta
+                while True:
+                    flushed = False
+                    for m in _SENT_BOUNDARY.finditer(buf):
+                        if m.end() >= _MIN_SENTENCE_CHARS:
+                            sentence = buf[:m.end()].strip()
+                            buf = buf[m.end():]
+                            if sentence:
+                                loop.call_soon_threadsafe(sent_q.put_nowait, sentence)
+                            flushed = True
+                            break
+                    if not flushed:
+                        break
+            tail = buf.strip()
+            if tail:
+                loop.call_soon_threadsafe(sent_q.put_nowait, tail)
+        except Exception as e:
+            loop.call_soon_threadsafe(sent_q.put_nowait, ("ERR", e))
+        finally:
+            loop.call_soon_threadsafe(sent_q.put_nowait, None)
+
+    producer = asyncio.create_task(asyncio.to_thread(_produce))
+    spoke_any = False
+    try:
+        while True:
+            item = await sent_q.get()
+            if item is None:
+                break
+            if isinstance(item, tuple) and item and item[0] == "ERR":
+                print(f"[ERR] claude stream: {item[1]}")
+                break
+            clean = buddy_server._sanitize_for_tts(item)
+            if not clean:
+                continue
+            if not first_logged[0]:
+                print(f"[STREAM] first sentence at {time.time()-t0:.2f}s: {clean[:60]!r}")
+                first_logged[0] = True
+            try:
+                ok = await _speak_streaming(clean)
+                spoke_any = spoke_any or ok
+            except Exception as e:
+                print(f"[ERR] sentence TTS: {e}")
+    finally:
+        await producer
+    return spoke_any
+
+
 async def main() -> None:
     print("=" * 60)
-    print("  Sara standalone mode listening — speak Arabic or English")
+    print("  Nebras standalone mode listening — speak Arabic or English")
     print("=" * 60)
 
     in_idx, out_idx = _pick_usb_device()
@@ -371,11 +520,12 @@ async def main() -> None:
 
     # Warm up Whisper + AI
     try:
-        stt = ElevenLabsSTT(); print("[STT] using ElevenLabs Scribe (cloud)")
+        assert os.getenv("ELEVENLABS_API_KEY"), "no ElevenLabs key"; stt = ElevenLabsSTT(); print("[STT] using ElevenLabs Scribe (cloud)")
     except Exception as _e:
         print(f"[STT] elevenlabs init failed: {_e}; falling back to local Whisper")
         stt = SpeechToText()
     ai = get_ai(provider=LLM_PROVIDER, model=OLLAMA_MODEL)
+    rt_stt = _RealtimeSTT()
     print("[INIT] ready.\n")
 
     stopping = False
@@ -399,13 +549,15 @@ async def main() -> None:
         if audio is None:
             continue
 
-        # STT — let Whisper auto-detect language
+        # STT — Scribe v2 Realtime (warm WS) first; batch Scribe/Whisper fallback.
         t0 = time.time()
-        try:
-            transcript = stt.transcribe_array(audio, sample_rate=WHISPER_RATE)
-        except Exception as e:
-            print(f"[ERR] STT failed: {e}")
-            continue
+        transcript = await rt_stt.transcribe(audio)
+        if transcript is None:
+            try:
+                transcript = stt.transcribe_array(audio, sample_rate=WHISPER_RATE)
+            except Exception as e:
+                print(f"[ERR] STT failed: {e}")
+                continue
         if not transcript or len(transcript.strip()) < MIN_TRANSCRIPT_CHARS:
             print(f"[STT] (skipped, too short: {transcript!r})")
             continue
@@ -425,6 +577,21 @@ async def main() -> None:
                 print("[VISION] no frame (camera busy or unavailable)")
         except Exception as _e:
             print(f"[VISION] capture error: {_e}")
+
+        # --- Fast path: stream Claude + speak sentence-by-sentence (non-crisis) ---
+        # Crisis messages MUST use the guaranteed hand-off path below (ai.chat),
+        # because the hand-off cannot be appended to already-spoken audio.
+        if getattr(ai, "provider", None) == "claude" and not ai.is_crisis(transcript):
+            t_turn = time.time()
+            try:
+                spoke = await _stream_claude_and_speak(ai, transcript, lang, frame_b64)
+            except Exception as e:
+                print(f"[ERR] stream path failed: {e}; falling back")
+                spoke = False
+            if spoke:
+                print(f"[TURN] {time.time()-t_turn:.2f}s (streamed claude+tts)")
+                continue
+            print("[TURN] stream produced nothing; using buffered path")
 
         # Claude (or Ollama)
         t0 = time.time()

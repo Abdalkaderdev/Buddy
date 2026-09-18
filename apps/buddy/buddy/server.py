@@ -132,7 +132,7 @@ except ImportError:
 from .ai import get_ai
 from .config import LLM_PROVIDER, OLLAMA_MODEL, TTS_VOICE, VOICES
 
-app = FastAPI(title="Sara - Companion Robot")
+app = FastAPI(title="Nebras - Companion Robot")
 
 # Get the static files directory
 STATIC_DIR = Path(__file__).parent / "static"
@@ -313,7 +313,7 @@ user_settings: dict[WebSocket, dict] = {}
 async def startup():
     """Initialize AI and robot on startup."""
     global ai, robot, motion
-    print("Initializing Sara AI...")
+    print("Initializing Nebras AI...")
     ai = get_ai(provider=LLM_PROVIDER, model=OLLAMA_MODEL)
 
     # Connect to robot
@@ -348,7 +348,7 @@ async def startup():
     except (asyncio.TimeoutError, Exception) as e:
         print(f"[TTS] pre-warm timed out or errored: {e} — continuing")
 
-    print("Sara is ready!")
+    print("Nebras is ready!")
 
 
 def _prewarm_whisper():
@@ -366,14 +366,14 @@ def _prewarm_whisper():
 # These get TTS-generated at boot and cached, so the very first reply of a
 # demo is instant (no ElevenLabs round-trip needed).
 PREWARM_PHRASES = [
-    "هلا! أنا سارة، شلونك اليوم؟",
+    "هلا! أنا نبراس، شلونك اليوم؟",
     "هلا بيك",
     "اي والله",
     "زين، تره خوش سؤال",
     "هاي والله شكلها سهلة بس قوية",
     "خوش، خل نبدأ",
     "اوكي خل نشتغلها سوا",
-    "Hi! I'm Sara, how are you today?",
+    "Hi! I'm Nebras, how are you today?",
     "Sure, let's do it.",
     "Good question.",
 ]
@@ -500,7 +500,7 @@ async def test_voice(voice_key: str):
     voice_code = VOICES[voice_key]["code"]
     print(f"[TEST] Testing voice: {voice_key} -> {voice_code}")
 
-    text = "مرحبا، أنا سارة" if "ar" in voice_key else "Hello, I am Sara"
+    text = "مرحبا، أنا نبراس" if "ar" in voice_key else "Hello, I am Nebras"
     audio = await text_to_speech(text, voice_code)
 
     if audio:
@@ -536,7 +536,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # Welcome message in Arabic — wrapped so a TTS failure here doesn't
     # kill the whole connection before chat can start.
     try:
-        welcome_text = "هلا! أنا سارة، صديقك الروبوت. شلونك اليوم؟"
+        welcome_text = "هلا! أنا نبراس، صديقك الروبوت. شلونك اليوم؟"
         welcome_audio = await text_to_speech(welcome_text, user_settings[websocket]["voice_code"])
         await websocket.send_json({
             "type": "message",
@@ -645,9 +645,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Confirm voice change
                     voice_name = VOICES[voice_key]["name"]
                     if VOICES[voice_key]["lang"] == "ar":
-                        confirm_text = "مرحبا! أنا سارة، صديقك الروبوت. شلونك اليوم؟"
+                        confirm_text = "مرحبا! أنا نبراس، صديقك الروبوت. شلونك اليوم؟"
                     else:
-                        confirm_text = f"Voice changed to {voice_name}. Hello, I'm Sara!"
+                        confirm_text = f"Voice changed to {voice_name}. Hello, I'm Nebras!"
 
                     audio_data = await text_to_speech(confirm_text, VOICES[voice_key]["code"])
                     await websocket.send_json({
@@ -680,7 +680,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 def main():
     """Run the web server. Uses HTTPS if BUDDY_SSL_CERT / BUDDY_SSL_KEY are set."""
     print("\n" + "=" * 50)
-    print("  SARA - Web Interface")
+    print("  NEBRAS - Web Interface")
     print("=" * 50)
 
     cert = os.getenv("BUDDY_SSL_CERT")
