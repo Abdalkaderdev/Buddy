@@ -470,6 +470,46 @@ _CARTESIA_MODEL = os.getenv("CARTESIA_MODEL", "sonic-3.5")
 _CARTESIA_LANG = os.getenv("CARTESIA_LANGUAGE", "ar")
 _CARTESIA_SR = 44100
 
+# --- Backchannel "thinking sounds" (GPT-like filler while Claude generates) ---
+_BACKCHANNEL_ENABLED = os.getenv("BACKCHANNEL", "1") == "1"
+_BACKCHANNEL_TEXTS = ["همم،", "اي،", "لحظة،", "أوكي،", "زين،"]
+_backchannel_files = []
+
+
+def _pregen_backchannels():
+    """Cache short backchannel clips once (raw PCM). Safe no-op without Cartesia."""
+    import os as _os
+    import hashlib as _hl
+    cache = _os.path.expanduser("~/.nebras_cache")
+    _os.makedirs(cache, exist_ok=True)
+    for t in _BACKCHANNEL_TEXTS:
+        key = _hl.sha1(("bc" + t + _CARTESIA_VOICE + _CARTESIA_MODEL).encode()).hexdigest()[:12]
+        p = _os.path.join(cache, f"bc_{key}.pcm")
+        if _os.path.exists(p) and _os.path.getsize(p) > 1500:
+            _backchannel_files.append(p)
+            continue
+        try:
+            pcm = _cartesia_pcm(t)
+            if pcm and len(pcm) > 1500:
+                with open(p, "wb") as f:
+                    f.write(pcm)
+                _backchannel_files.append(p)
+        except Exception as e:
+            print(f"[BC] pregen failed: {e}")
+    return len(_backchannel_files)
+
+
+async def _play_backchannel():
+    """Play one random cached backchannel clip (~0.4s). Returns immediately if none."""
+    if not (_BACKCHANNEL_ENABLED and _backchannel_files):
+        return
+    import random as _rnd
+    try:
+        await _play_pcm_file(_rnd.choice(_backchannel_files))
+    except Exception:
+        pass
+
+
 
 async def _speak_cartesia(text: str) -> bool:
     """Stream Cartesia TTS (SSE, raw PCM) straight into ffplay. True on success."""
@@ -628,6 +668,8 @@ async def _stream_claude_and_speak(ai, transcript, lang, frame_b64) -> bool:
             loop.call_soon_threadsafe(sent_q.put_nowait, None)
 
     producer = asyncio.create_task(asyncio.to_thread(_produce))
+    # GPT-like filler: play a short "hmm..." while the first sentence is still forming.
+    await _play_backchannel()
     spoke_any = False
     try:
         while True:
@@ -688,6 +730,8 @@ async def main() -> None:
     FAQ = faq.load()
     _nfaq = faq.pregenerate(FAQ, _cartesia_pcm, _CARTESIA_VOICE, _CARTESIA_MODEL)
     print(f"[FAQ] {len(FAQ)} interview answers ready ({_nfaq} newly generated)")
+    _nbc = _pregen_backchannels()
+    print(f"[BC] {_nbc} backchannel clips ready")
     print("[INIT] ready.\n")
 
     stopping = False
