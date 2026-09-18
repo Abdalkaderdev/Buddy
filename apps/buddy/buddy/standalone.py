@@ -378,6 +378,14 @@ async def _capture_utterance(input_device: int | None) -> np.ndarray | None:
     if not speech_buffer or speech_ms < MIN_SPEECH_MS:
         return None
     audio = np.concatenate(speech_buffer).astype(np.float32)
+    try:
+        import wave as _wave
+        _pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes()
+        with _wave.open("/tmp/last_capture.wav", "wb") as _wf:
+            _wf.setnchannels(1); _wf.setsampwidth(2); _wf.setframerate(CAPTURE_RATE)
+            _wf.writeframes(_pcm)
+    except Exception:
+        pass
     # Downsample CAPTURE_RATE -> WHISPER_RATE with linear interpolation
     if CAPTURE_RATE != WHISPER_RATE:
         n_out = int(len(audio) * WHISPER_RATE / CAPTURE_RATE)
@@ -715,6 +723,15 @@ async def _stream_claude_and_speak(ai, transcript, lang, frame_b64) -> bool:
     return spoke_any
 
 
+def _denoise(audio):
+    try:
+        import noisereduce as _nr
+        return _nr.reduce_noise(y=audio, sr=WHISPER_RATE, stationary=True, prop_decrease=0.85).astype(np.float32)
+    except Exception as _e:
+        print(f"[DENOISE] {_e}")
+        return audio
+
+
 async def main() -> None:
     print("=" * 60)
     print("  Nebras standalone mode listening — speak Arabic or English")
@@ -775,6 +792,7 @@ async def main() -> None:
         if audio is None:
             continue
 
+        audio = _denoise(audio)   # strip constant amp hum before STT
         # STT — Scribe v2 Realtime (warm WS) first; batch Scribe/Whisper fallback.
         t0 = time.time()
         transcript = await rt_stt.transcribe(audio)
