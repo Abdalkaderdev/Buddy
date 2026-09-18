@@ -469,7 +469,11 @@ _CARTESIA_VOICE = os.getenv("CARTESIA_VOICE_ID", "731ace69-ee17-41bc-8c6f-665c9f
 _CARTESIA_MODEL = os.getenv("CARTESIA_MODEL", "sonic-3.5")
 _CARTESIA_LANG = os.getenv("CARTESIA_LANGUAGE", "ar")
 _CARTESIA_SR = 48000
-_CARTESIA_SPEED = os.getenv("CARTESIA_SPEED", "slow")
+_CARTESIA_SPEED_RAW = os.getenv("CARTESIA_SPEED", "-0.7")
+try:
+    _CARTESIA_SPEED = float(_CARTESIA_SPEED_RAW)
+except (TypeError, ValueError):
+    _CARTESIA_SPEED = _CARTESIA_SPEED_RAW
 
 # --- Backchannel "thinking sounds" (GPT-like filler while Claude generates) ---
 _BACKCHANNEL_ENABLED = os.getenv("BACKCHANNEL", "1") == "1"
