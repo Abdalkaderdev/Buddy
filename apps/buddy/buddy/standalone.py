@@ -36,6 +36,7 @@ import sounddevice as sd
 from .ai import get_ai
 from .audio import SpeechToText
 from .vision import capture_frame_b64
+from . import faq
 import os
 import io
 import wave
@@ -434,6 +435,136 @@ _SENT_BOUNDARY = _re_sent.compile(r"[.!?\u061F\u2026\n]")  # . ! ? Arabic-? elli
 _MIN_SENTENCE_CHARS = 15
 
 
+# --- Cartesia (Sonic 3.5) streaming TTS — primary voice (Fatima) ---
+_CARTESIA_KEY = os.getenv("CARTESIA_API_KEY")
+_CARTESIA_VOICE = os.getenv("CARTESIA_VOICE_ID", "731ace69-ee17-41bc-8c6f-665c9f1db95c")
+_CARTESIA_MODEL = os.getenv("CARTESIA_MODEL", "sonic-3.5")
+_CARTESIA_LANG = os.getenv("CARTESIA_LANGUAGE", "ar")
+_CARTESIA_SR = 44100
+
+
+async def _speak_cartesia(text: str) -> bool:
+    """Stream Cartesia TTS (SSE, raw PCM) straight into ffplay. True on success."""
+    if not _CARTESIA_KEY:
+        return False
+    import json as _json
+    import urllib.request as _url
+    import base64 as _b64
+    payload = _json.dumps({
+        "model_id": _CARTESIA_MODEL,
+        "transcript": text,
+        "voice": {"mode": "id", "id": _CARTESIA_VOICE},
+        "language": _CARTESIA_LANG,
+        "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": _CARTESIA_SR},
+    }).encode()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
+            "-f", "s16le", "-ar", str(_CARTESIA_SR), "-ac", "1",
+            "-fflags", "nobuffer", "-flags", "low_delay",
+            "-probesize", "32", "-analyzeduration", "0", "-i", "pipe:0",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except Exception as e:
+        print(f"[TTS][cartesia] ffplay spawn failed: {e}")
+        return False
+
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue(maxsize=128)
+    t0 = time.time()
+    first = []
+
+    def _pump():
+        try:
+            req = _url.Request(
+                "https://api.cartesia.ai/tts/sse", data=payload,
+                headers={"X-API-Key": _CARTESIA_KEY, "Cartesia-Version": "2025-04-16",
+                         "Content-Type": "application/json"})
+            r = _url.urlopen(req, timeout=30)
+            import json as __json
+            for line in r:
+                line = line.decode("utf-8", "ignore").strip()
+                if line.startswith("data:"):
+                    try:
+                        ev = __json.loads(line[5:].strip())
+                    except Exception:
+                        continue
+                    d = ev.get("data")
+                    if d:
+                        loop.call_soon_threadsafe(q.put_nowait, _b64.b64decode(d))
+                    if ev.get("type") == "done" or ev.get("done"):
+                        break
+        except Exception as e:
+            loop.call_soon_threadsafe(q.put_nowait, ("ERR", e))
+        finally:
+            loop.call_soon_threadsafe(q.put_nowait, None)
+
+    pump = asyncio.create_task(asyncio.to_thread(_pump))
+    ok = False
+    try:
+        while True:
+            item = await q.get()
+            if item is None:
+                break
+            if isinstance(item, tuple) and item and item[0] == "ERR":
+                print(f"[TTS][cartesia] stream error: {item[1]}")
+                break
+            if not first:
+                first.append(time.time())
+                print(f"[TTS][cartesia] first chunk at {first[0]-t0:.2f}s")
+            try:
+                proc.stdin.write(item)
+                await proc.stdin.drain()
+                ok = True
+            except (BrokenPipeError, ConnectionResetError):
+                break
+    finally:
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+        await pump
+        await proc.wait()
+    return ok
+
+
+async def _speak(text: str) -> bool:
+    """Speak one chunk: Cartesia (Fatima) primary, ElevenLabs streaming fallback."""
+    try:
+        if await _speak_cartesia(text):
+            return True
+    except Exception as e:
+        print(f"[TTS][cartesia] failed: {e}; -> ElevenLabs")
+    return await _speak_streaming(text)
+
+
+def _cartesia_pcm(text: str):
+    """Full Cartesia TTS as raw s16le bytes (used to pre-cache FAQ answers)."""
+    if not _CARTESIA_KEY:
+        return None
+    import json as _json
+    import urllib.request as _url
+    payload = _json.dumps({
+        "model_id": _CARTESIA_MODEL, "transcript": text,
+        "voice": {"mode": "id", "id": _CARTESIA_VOICE}, "language": _CARTESIA_LANG,
+        "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": _CARTESIA_SR},
+    }).encode()
+    req = _url.Request("https://api.cartesia.ai/tts/bytes", data=payload,
+        headers={"X-API-Key": _CARTESIA_KEY, "Cartesia-Version": "2025-04-16",
+                 "Content-Type": "application/json"})
+    return _url.urlopen(req, timeout=45).read()
+
+
+async def _play_pcm_file(path: str) -> None:
+    proc = await asyncio.create_subprocess_exec(
+        "ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
+        "-f", "s16le", "-ar", str(_CARTESIA_SR), "-ac", "1", "-i", path,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    await proc.wait()
+
+
 async def _stream_claude_and_speak(ai, transcript, lang, frame_b64) -> bool:
     """Stream Claude tokens; speak each completed sentence in order as it forms.
     Returns True if any audio was spoken. Falls through (returns False) if the
@@ -485,7 +616,7 @@ async def _stream_claude_and_speak(ai, transcript, lang, frame_b64) -> bool:
                 print(f"[STREAM] first sentence at {time.time()-t0:.2f}s: {clean[:60]!r}")
                 first_logged[0] = True
             try:
-                ok = await _speak_streaming(clean)
+                ok = await _speak(clean)
                 spoke_any = spoke_any or ok
             except Exception as e:
                 print(f"[ERR] sentence TTS: {e}")
@@ -526,6 +657,9 @@ async def main() -> None:
         stt = SpeechToText()
     ai = get_ai(provider=LLM_PROVIDER, model=OLLAMA_MODEL)
     rt_stt = _RealtimeSTT()
+    FAQ = faq.load()
+    _nfaq = faq.pregenerate(FAQ, _cartesia_pcm, _CARTESIA_VOICE, _CARTESIA_MODEL)
+    print(f"[FAQ] {len(FAQ)} interview answers ready ({_nfaq} newly generated)")
     print("[INIT] ready.\n")
 
     stopping = False
@@ -564,6 +698,16 @@ async def main() -> None:
         print(f"[STT] {time.time()-t0:.2f}s -> {transcript!r}")
 
         lang = _detect_lang(transcript)
+
+        # Instant interview answer, matched BEFORE the LLM — no credits, always identical.
+        _hit = faq.match(transcript, FAQ)
+        if _hit and _hit.get("_cache") and os.path.exists(_hit["_cache"]):
+            print(f"[FAQ] instant answer: {_hit['id']}")
+            try:
+                await _play_pcm_file(_hit["_cache"])
+            except Exception as _e:
+                print(f"[FAQ] playback failed: {_e}")
+            continue
 
         # Grab one fresh camera frame for multimodal context (Claude only).
         frame_b64 = None
@@ -616,7 +760,7 @@ async def main() -> None:
         t0 = time.time()
         streamed = False
         try:
-            streamed = await _speak_streaming(tts_text)
+            streamed = await _speak(tts_text)
         except Exception as e:
             print(f"[ERR] streaming TTS failed: {e}")
         if streamed:

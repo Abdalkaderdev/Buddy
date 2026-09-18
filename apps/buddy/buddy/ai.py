@@ -179,7 +179,7 @@ class BuddyAI:
         try:
             with self.client.messages.stream(
                 model=self.model,
-                max_tokens=300,
+                max_tokens=200,
                 system=SYSTEM_PROMPT,
                 messages=self.conversation_history,
             ) as stream:
@@ -207,7 +207,7 @@ class BuddyAI:
         t0 = _t.time()
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=300,
+            max_tokens=200,
             system=SYSTEM_PROMPT,
             messages=self.conversation_history,
         )
