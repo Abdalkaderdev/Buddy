@@ -468,7 +468,8 @@ _CARTESIA_KEY = os.getenv("CARTESIA_API_KEY")
 _CARTESIA_VOICE = os.getenv("CARTESIA_VOICE_ID", "731ace69-ee17-41bc-8c6f-665c9f1db95c")
 _CARTESIA_MODEL = os.getenv("CARTESIA_MODEL", "sonic-3.5")
 _CARTESIA_LANG = os.getenv("CARTESIA_LANGUAGE", "ar")
-_CARTESIA_SR = 44100
+_CARTESIA_SR = 48000
+_CARTESIA_SPEED = os.getenv("CARTESIA_SPEED", "slow")
 
 # --- Backchannel "thinking sounds" (GPT-like filler while Claude generates) ---
 _BACKCHANNEL_ENABLED = os.getenv("BACKCHANNEL", "1") == "1"
@@ -521,7 +522,7 @@ async def _speak_cartesia(text: str) -> bool:
     payload = _json.dumps({
         "model_id": _CARTESIA_MODEL,
         "transcript": text,
-        "voice": {"mode": "id", "id": _CARTESIA_VOICE},
+        "voice": {"mode": "id", "id": _CARTESIA_VOICE, "__experimental_controls": {"speed": _CARTESIA_SPEED}},
         "language": _CARTESIA_LANG,
         "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": _CARTESIA_SR},
     }).encode()
@@ -616,7 +617,7 @@ def _cartesia_pcm(text: str):
     import urllib.request as _url
     payload = _json.dumps({
         "model_id": _CARTESIA_MODEL, "transcript": text,
-        "voice": {"mode": "id", "id": _CARTESIA_VOICE}, "language": _CARTESIA_LANG,
+        "voice": {"mode": "id", "id": _CARTESIA_VOICE, "__experimental_controls": {"speed": _CARTESIA_SPEED}}, "language": _CARTESIA_LANG,
         "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": _CARTESIA_SR},
     }).encode()
     req = _url.Request("https://api.cartesia.ai/tts/bytes", data=payload,
