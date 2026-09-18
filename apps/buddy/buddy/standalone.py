@@ -86,7 +86,7 @@ CHANNELS = 1
 BLOCK_MS = 30
 BLOCK_FRAMES = CAPTURE_RATE * BLOCK_MS // 1000
 
-RMS_THRESHOLD = 0.065         # AGC on: floor pumps to ~0.05, speech 0.09+
+RMS_THRESHOLD = float(os.getenv("BUDDY_VAD_THRESHOLD", "0.09"))  # base; adaptive raises it above room noise
 MIN_SPEECH_MS = 600           # must have this much speech before we accept utterance
 SILENCE_HANGOVER_MS = 550    # tightened for snappier turn-taking
 MAX_UTTERANCE_MS = 10_000     # hard cap
@@ -353,6 +353,13 @@ async def _capture_utterance(input_device: int | None) -> np.ndarray | None:
                         and silence_ms >= SILENCE_HANGOVER_MS
                     ):
                         break
+                    # False trigger: a brief blip that never became real speech
+                    # and has now gone quiet -> abandon and keep listening.
+                    if speech_ms < MIN_SPEECH_MS and silence_ms >= 400:
+                        speaking = False
+                        speech_buffer = []
+                        speech_ms = 0
+                        silence_ms = 0
                 else:
                     idle_blocks += 1
                     last_idle_rms = max(last_idle_rms, rms)
